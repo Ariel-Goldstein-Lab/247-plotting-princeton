@@ -123,7 +123,7 @@ concat-lags:
 
 LAGS_PLT := {-10000..10000..25} # lag10k-25
 LAGS_PLT := {-5000..5000..25} # lag5k-25
-LAGS_PLT := {-2000..2000..25} # lag2k-25
+LAGS_PLT := {-2000..2001..25} # lag2k-25
 
 # Plotting for vanilla encoding (no concatenated lags)
 LAGS_SHOW := $(LAGS_PLT)
@@ -166,7 +166,7 @@ SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-ende-outer-comp.csv tfs-sig-fi
 
 
 plot-encoding:
-	rm -f results/figures/*
+	# rm -f results/figures/*
 	python scripts/tfsplt_encoding.py \
 		--sid 625 676 7170 798 \
 		--formats \
@@ -184,7 +184,7 @@ plot-encoding:
 		$(PLT_PARAMS) \
 		--y-vals-limit $(Y_LIMIT) \
 		--outfile results/figures/tfs-encoding.pdf
-	rsync -av results/figures/ ~/tigress/247-encoding-results/
+    # rsync -av results/figures/ ~/tigress/247-encoding-results/
 
 
 plot-encoding-layers:
