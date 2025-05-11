@@ -14,7 +14,7 @@ link-data:
 	mkdir -p data
 	mkdir -p data/plotting
 	rsync -rav /projects/HASSON/247/plotting/* data/plotting/
-	ln -fs $(PDIR)/247-pickling/results data/pickling
+	ln -fs $(PDIR)/247-embedding/results data/embedding
 	ln -fs $(PDIR)/247-encoding/results data/encoding
 	mkdir -p results
 	mkdir -p results/figures
@@ -119,10 +119,8 @@ concat-lags:
 (for concatenated lags, such as type Quardra and type Final plots, X_VALS_SHOW is different from LAGS_SHOW)
 
 # LAG_TKS: lag ticks (tick marks to show on the x-axis) (optional)
-# LAT_TK_LABLS: lag tick labels (tick mark lables to show on the x-axis) (optional)
+# LAG_TK_LABLS: lag tick labels (tick mark lables to show on the x-axis) (optional)
 
-LAGS_PLT := {-10000..10000..25} # lag10k-25
-LAGS_PLT := {-5000..5000..25} # lag5k-25
 LAGS_PLT := {-2000..2001..25} # lag2k-25
 
 # Plotting for vanilla encoding (no concatenated lags)
@@ -137,42 +135,69 @@ LAG_TK_LABLS :=
 # LAG_TKS := 
 # LAG_TK_LABLS :=
 
-# Line color by (Choose what lines colors are decided by) (required) (labels or keys)
-# Line style by (Choose what line styles are decided by) (required) (labels or keys)
+# Line color by (Choose what lines colors are decided by) (required) (labels[sid] or keys [comp/prod])
+# Line style by (Choose what line styles are decided by) (required) (labels[sid] or keys [comp/prod])
 # Split Direction, if any (Choose how plots are split) (optional) (horizontal or vertical)
 # Split by, if any (Choose how lines are split into plots) (Only effective when Split is not empty) (optional) (labels or keys)
 PLT_PARAMS := --lc-by labels --ls-by keys # plot for just one key (podcast plots)
 PLT_PARAMS := --lc-by labels --ls-by keys --split horizontal --split-by keys # plot for prod+comp (247 plots)
 
 # y-axis limits (for individual plots) (leave it 0 for automatic)
-Y_LIMIT := 0 0.3
-Y_LIMIT := 0
+Y_LIMIT := 0 # 0 0.3
 
 # Figure Size (width height)
-FIG_SZ:= 15 6
-FIG_SZ:= 18 6
+FIG_SZ:= 18 6 # 15 6
 
 # Significant electrode file directory
-SIG_FN_DIR := 'data/plotting/sig-elecs'
-SIG_FN_DIR := 'data/plotting/sig-elecs/20230510-tfs-sig-file'
-SIG_FN_DIR := 'data/plotting/sig-elecs/20230413-whisper-paper'
+# SIG_FN_DIR := 'data/plotting/sig-elecs'
+#SIG_FN_DIR := 'data/plotting/sig-elecs/20230510-tfs-sig-file'
+# SIG_FN_DIR := 'data/plotting/sig-elecs/20230413-whisper-paper'
+SIG_FN_DIR := 'data/plotting/sig-elecs/20230723-tfs-sig-file' # Maybe use llama
 
 # Significant electrode files
-SIG_FN := 
-SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-en-last-0.01-comp.csv tfs-sig-file-%s-whisper-de-best-0.01-prod.csv
-SIG_FN := --sig-elec-file podcast_160.csv
+# SIG_FN :=
+# SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-en-last-0.01-comp.csv tfs-sig-file-%s-whisper-de-best-0.01-prod.csv
+# SIG_FN := --sig-elec-file podcast_160.csv
 SIG_FN := --sig-elec-file tfs-sig-file-glove-%s-comp.csv tfs-sig-file-glove-%s-prod.csv
 SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-ende-outer-comp.csv tfs-sig-file-%s-whisper-ende-outer-prod.csv
 
+# EMBEDDINGS
+SID := 625
+EMB := gemma-2-2b
+ENC_DIR_SUFFIX := lag2k-25-all
+LAYER_IDX := 13
+CONTEXT_LEN := 32
+REGULARIZATION := ridge
+PCA := 50
+NORM =
+OUTPUT_DIR_SUFFIX :=
+
+
+ifneq ($(strip $(REGULARIZATION)),)
+  SUBFOLDER_SUFFIX := -reg$(REGULARIZATION)
+else ifneq ($(strip $(PCA)),)
+  SUBFOLDER_SUFFIX := -pca$(PCA)
+else
+  SUBFOLDER_SUFFIX :=
+endif
+ifneq ($(strip $(NORM)),)
+  ifneq ($(strip $(SUBFOLDER_SUFFIX)),)
+    SUBFOLDER_SUFFIX := $(SUBFOLDER_SUFFIX)-norm$(NORM)
+  else
+    SUBFOLDER_SUFFIX := -norm$(NORM)
+  endif
+endif
+
+FULL_DIR = tk-tfs-$(SID)-$(EMB)-$(ENC_DIR_SUFFIX)/tk-200ms-$(SID)-lay$(LAYER_IDX)-con$(CONTEXT_LEN)$(SUBFOLDER_SUFFIX)
+FORMATS = 'data/encoding/tfs/$(FULL_DIR)/*_%s.csv'
 
 plot-encoding:
 	# rm -f results/figures/*
 	python scripts/tfsplt_encoding.py \
-		--sid 625 676 7170 798 \
-		--formats \
-			'data/encoding/tfs//*/*_%s.csv' \
-		--labels  \
-		--keys comp prod \
+		--sid $(SID) \
+		--formats $(FORMATS)\
+		--labels $(SID) \
+		--keys prod comp \
 		--sig-elec-file-dir $(SIG_FN_DIR)\
 		$(SIG_FN) \
 		--fig-size $(FIG_SZ) \
@@ -183,7 +208,7 @@ plot-encoding:
 		$(LAG_TK_LABLS) \
 		$(PLT_PARAMS) \
 		--y-vals-limit $(Y_LIMIT) \
-		--outfile results/figures/tfs-encoding.pdf
+		--outfile results/figures/$(FULL_DIR)$(OUTPUT_DIR_SUFFIX).pdf
     # rsync -av results/figures/ ~/tigress/247-encoding-results/
 
 
@@ -234,3 +259,19 @@ plot-brainmap-subjects:
 		$(SIG_FN) \
 		--outfile fig_%s.png
 	rsync -av results/figures/ ~/tigress/247-encoding-results/
+
+#plot-encoding-coeffs:
+#    rm -f results/figures/*
+#    python scripts/tfsplt_encoding_coeffs.py \
+#        --sid 625 676 7170 798 \
+#        --formats \
+#            'data/encoding/tfs//*/*_%s.csv' \
+#        --labels $(shell seq 0 24) \
+#        --colors viridis \
+#        --keys comp prod \
+#        --sig-elec-file-dir $(SIG_FN_DIR)\
+#        $(SIG_FN) \
+#        --fig-size $(FIG_SZ) \
+#        --lags-plot $(LAGS_PLT) \
+#        --lags-show $(LAGS_SHOW) \
+#        --x-vals-show $(X_VALS_SHOW) \

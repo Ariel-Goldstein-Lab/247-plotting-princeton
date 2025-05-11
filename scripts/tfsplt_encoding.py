@@ -50,7 +50,7 @@ def arg_parser():
     parser.add_argument("--ls-by", type=str, default=None)
     parser.add_argument("--split", type=str, default=None)
     parser.add_argument("--split-by", type=str, default=None)
-    parser.add_argument("--outfile", default="results/figures/tfs-encoding.pdf")
+    parser.add_argument("--outfile", type=str, default="results/figures/tfs-encoding.pdf")
     args = parser.parse_args()
 
     return args
@@ -405,10 +405,37 @@ def plot_electrodes(args, df, pdf):
             ax.plot(
                 args.x_vals_show,
                 values,
-                label=label,
+                # label=label,
                 color=args.cmap[map_key],
                 ls=args.smap[map_key],
+                linewidth=0.5, # Thinner line for individual electrodes
             )
+
+        # Calculate and plot averages for each unique key
+        for key_group, key_df in subdf.groupby(level=["label", "key"]):
+            # Calculate the average across all rows for this key group
+            avg_values = key_df.mean(axis=0)
+            avg_sem = key_df.sem(axis=0)
+            map_key = (key_group[0], key_group[1])
+            label = "-".join(map_key) + " (avg)"
+
+            # Plot the average with a thicker line
+            ax.plot(
+                args.x_vals_show,
+                avg_values,
+                label=f"{label} ({len(key_df)})",
+                color=args.cmap[map_key],
+                ls=args.smap[map_key],
+                linewidth=3,  # Thicker line for average
+            )
+            ax.fill_between(
+                args.x_vals_show,
+                avg_values - avg_sem,
+                avg_values + avg_sem,
+                alpha=0.5,
+                color=args.cmap[map_key],
+            )
+
         if len(args.lag_ticks) != 0:
             ax.set_xticks(args.lag_ticks)
             ax.set_xticklabels(args.lag_tick_labels)
@@ -591,6 +618,7 @@ def main():
     df = organize_data(args, df)
 
     # Plotting
+    os.makedirs(os.path.dirname(args.outfile), exist_ok=True)
     pdf = PdfPages(args.outfile)
     if len(args.y_vals_limit) == 1:  # automatic y limit
         args.y_vals_limit = [df.min().min(), df.max().max()]
