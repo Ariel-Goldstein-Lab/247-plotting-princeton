@@ -246,7 +246,7 @@ def aggregate_data(args):
         ), f"No results found under {fname}"  # check files exist under format
 
         for resultfn in files:
-            elec = os.path.basename(resultfn).replace(".csv", "")[:-5]
+            elec = os.path.basename(resultfn).replace(".csv", "").replace("_lasso", "")[:-5]
             # Skip electrodes if they're not part of the sig list
             if (
                 len(args.sigelecs)
@@ -254,6 +254,8 @@ def aggregate_data(args):
             ):
                 continue
             df = pd.read_csv(resultfn, header=None)
+            if df.shape[1] != 161 and df.shape[0] == 161:
+                df = df.T  # Should DELETE this in the future! Transpose if needed (_lasso coeff before correction).
             df.insert(0, "sid", load_sid)
             df.insert(0, "key", key)
             df.insert(0, "electrode", elec)
@@ -630,6 +632,7 @@ def main():
         pdf = plot_electrodes(args, df, pdf)
 
     pdf.close()
+    print("Plotting done, results saved to", args.outfile)
 
 
 if __name__ == "__main__":

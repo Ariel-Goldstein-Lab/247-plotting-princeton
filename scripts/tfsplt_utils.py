@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 
 def read_sig_file(filename, filedir, old_results=False):
-    sig_file = pd.read_csv(os.path.join(filedir, filename))
+    sig_file = pd.read_csv(os.path.join(get_dir(filedir), filename))
     sig_file["sid_electrode"] = (
         sig_file["subject"].astype(str) + "_" + sig_file["electrode"]
     )
@@ -189,3 +189,16 @@ def get_fader_color(c1, c2, num):
     """Get self-defined continuous colors"""
     colors = [colorFader(c1, c2, i / num) for i in range(0, num)]
     return colors
+
+def get_dir(path_ending):
+    """Get the path a directory. Used to allow running through Makefile or through script directly (e.g. for debugging)"""
+    current_dir = os.getcwd()
+    # Check if we're in the main directory (with data/ as a direct subdirectory)
+    if os.path.isdir(os.path.join(current_dir, path_ending)):
+        return os.path.join(current_dir, path_ending)
+    # Check if we're in a script/ subdirectory (need to go one level up)
+    elif os.path.basename(current_dir) == "scripts" and os.path.isdir(os.path.join(os.path.dirname(current_dir), path_ending)):
+        return os.path.join(os.path.dirname(current_dir), path_ending)
+    # If neither condition is met, raise an error
+    else:
+        raise FileNotFoundError(f"Could not locate the data directory ({path_ending})")

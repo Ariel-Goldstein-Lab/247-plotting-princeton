@@ -139,8 +139,8 @@ LAG_TK_LABLS :=
 # Line style by (Choose what line styles are decided by) (required) (labels[sid] or keys [comp/prod])
 # Split Direction, if any (Choose how plots are split) (optional) (horizontal or vertical)
 # Split by, if any (Choose how lines are split into plots) (Only effective when Split is not empty) (optional) (labels or keys)
-PLT_PARAMS := --lc-by labels --ls-by keys # plot for just one key (podcast plots)
-PLT_PARAMS := --lc-by labels --ls-by keys --split horizontal --split-by keys # plot for prod+comp (247 plots)
+# PLT_PARAMS := --lc-by labels --ls-by keys # plot for just one key (podcast plots)
+PLT_PARAMS := --lc-by keys --ls-by labels # --split horizontal --split-by keys # plot for prod+comp (247 plots)
 
 # y-axis limits (for individual plots) (leave it 0 for automatic)
 Y_LIMIT := 0 # 0 0.3
@@ -150,28 +150,40 @@ FIG_SZ:= 18 6 # 15 6
 
 # Significant electrode file directory
 # SIG_FN_DIR := 'data/plotting/sig-elecs'
-#SIG_FN_DIR := 'data/plotting/sig-elecs/20230510-tfs-sig-file'
+# SIG_FN_DIR := 'data/plotting/sig-elecs/20230510-tfs-sig-file'
 # SIG_FN_DIR := 'data/plotting/sig-elecs/20230413-whisper-paper'
-SIG_FN_DIR := 'data/plotting/sig-elecs/20230723-tfs-sig-file' # Maybe use llama
+SIG_FN_DIR := data/plotting/sig-elecs/20230723-tfs-sig-file # Maybe use llama
+SIG_FN_DIR := data/plotting/sig-elecs/all_elecs
+SIG_FN_DIR := data/plotting/sig-elecs
 
 # Significant electrode files
 # SIG_FN :=
 # SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-en-last-0.01-comp.csv tfs-sig-file-%s-whisper-de-best-0.01-prod.csv
 # SIG_FN := --sig-elec-file podcast_160.csv
 SIG_FN := --sig-elec-file tfs-sig-file-glove-%s-comp.csv tfs-sig-file-glove-%s-prod.csv
-SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-ende-outer-comp.csv tfs-sig-file-%s-whisper-ende-outer-prod.csv
+# SIG_FN := --sig-elec-file tfs-sig-file-%s-whisper-ende-outer-comp.csv tfs-sig-file-%s-whisper-ende-outer-prod.csv
+SIG_FN := --sig-elec-file tfs-sig-file-all_elecs-%s-comp.csv tfs-sig-file-all_elecs-%s-prod.csv
+SIG_FN := --sig-elec-file podcast_%s_160.csv
+SIG_FN := --sig-elec-file podcast_%s_glove_elecs.csv
 
 # EMBEDDINGS
-SID := 625
-EMB := gemma-2-2b
+SID := 777
+EMB := gemma-scope-2b-pt-res-canonical#gpt2-xl#gemma-2-2b#
 ENC_DIR_SUFFIX := lag2k-25-all
 LAYER_IDX := 13
 CONTEXT_LEN := 32
-REGULARIZATION := ridge
-PCA := 50
-NORM =
+REGULARIZATION := lasso
+PCA :=
+NORM :=
+SIG_COEFFS :=
+INPUT_DIR_SUFFIX :=
 OUTPUT_DIR_SUFFIX :=
 
+ifeq ($(strip $(SID)),777)
+  TYPE := podcast
+else
+    TYPE := tfs
+endif
 
 ifneq ($(strip $(REGULARIZATION)),)
   SUBFOLDER_SUFFIX := -reg$(REGULARIZATION)
@@ -187,9 +199,20 @@ ifneq ($(strip $(NORM)),)
     SUBFOLDER_SUFFIX := -norm$(NORM)
   endif
 endif
+ifeq ($(strip $(REGULARIZATION)),lasso)
+  ifneq ($(strip $(SIG_COEFFS)),)
+    SUBFOLDER_SUFFIX := $(SUBFOLDER_SUFFIX)-sig_coeffs
+  endif
+endif
 
-FULL_DIR = tk-tfs-$(SID)-$(EMB)-$(ENC_DIR_SUFFIX)/tk-200ms-$(SID)-lay$(LAYER_IDX)-con$(CONTEXT_LEN)$(SUBFOLDER_SUFFIX)
-FORMATS = 'data/encoding/tfs/$(FULL_DIR)/*_%s.csv'
+FULL_DIR = tk-$(TYPE)-$(SID)-$(EMB)-$(ENC_DIR_SUFFIX)/tk-200ms-$(SID)-lay$(LAYER_IDX)-con$(CONTEXT_LEN)$(SUBFOLDER_SUFFIX)$(INPUT_DIR_SUFFIX)
+FORMATS = data/encoding/$(TYPE)/$(FULL_DIR)/*_%s
+
+ifneq ($(strip $(SIG_COEFFS)),)
+  FORMATS := $(FORMATS)_lasso
+endif
+FORMATS := $(FORMATS).csv
+
 
 plot-encoding:
 	# rm -f results/figures/*
