@@ -775,8 +775,12 @@ def main():
     df = organize_data(args, df)
 
     # Plotting
-    os.makedirs(os.path.dirname(args.outfile), exist_ok=True)
+    os.makedirs(get_dir(os.path.dirname(args.outfile)), exist_ok=True)
     pdf = PdfPages(args.outfile)
+
+    # Add arguments summary as first page
+    pdf = plot_args_summary(args, pdf)
+
     if len(args.y_vals_limit) == 1:  # automatic y limit
         args.y_vals_limit = [df.min().min(), df.max().max()]
     if args.split:
