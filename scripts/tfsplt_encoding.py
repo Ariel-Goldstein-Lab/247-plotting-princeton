@@ -243,13 +243,20 @@ def aggregate_data(args):
     print("Aggregating data")
 
     def read_file(fname):
-        files = glob.glob(fname)
+        fname_dir = get_dir(os.path.dirname(fname))
+        files = glob.glob(os.path.join(fname_dir, os.path.basename(fname)))
         assert (
             len(files) > 0
         ), f"No results found under {fname}"  # check files exist under format
 
         for resultfn in files:
-            elec = os.path.basename(resultfn).replace(".csv", "").replace("_lasso", "")[:-5]
+            # elec = os.path.basename(resultfn).replace(".csv", "").replace("_lasso", "")[:-5]
+            pattern = r'^(.*?)_(.*?)(?=_(?:comp|prod))'
+            compiled_pattern = re.compile(pattern)
+            match = compiled_pattern.match(os.path.basename(resultfn))
+            if match is None:
+                raise ValueError(f"Filename {resultfn} does not match expected pattern")
+            elec = match[0]
             # Skip electrodes if they're not part of the sig list
             if (
                 len(args.sigelecs)
