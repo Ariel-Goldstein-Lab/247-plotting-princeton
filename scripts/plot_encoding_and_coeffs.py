@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
-def plot_main(patient, mode, models_info, filter_type, min_alpha, max_alpha, num_alphas, p_threshold, save_dir):
+def plot_encoding_and_coeffs_lines(patient, mode, models_info, filter_type, min_alpha, max_alpha, num_alphas, p_threshold, save_dir):
     """
     Main function to plot the encoding and coefficients comparison.
     """
@@ -48,12 +48,15 @@ def plot_main(patient, mode, models_info, filter_type, min_alpha, max_alpha, num
 
 def plot_coeffs_heatmap(patient, mode, models_info, filter_type, min_alpha, max_alpha, num_alphas, elec_name, p_threshold, save_dir):
     models_info, electrode_names_df, recording_type = load_general_files(models_info, filter_type, patient)
+    save_dir = os.path.join(save_dir, "coeffs_heatmaps_sorted")
+    os.makedirs(save_dir, exist_ok=True)
 
     for elec_name in electrode_names_df["full_elec_name"]:
         print(f"Plotting coefficients heatmap for electrode {elec_name}")
         plot_coeffs_heatmap_single_elec(elec_name, max_alpha, min_alpha, mode, models_info, num_alphas, patient,
                                         save_dir)
 
+    print(f"!!!!!! Plotting complete. HTML file saved as {save_dir} !!!!!!")
     return
 
 
@@ -78,8 +81,6 @@ def plot_coeffs_heatmap_single_elec(elec_name, max_alpha, min_alpha, mode, model
     # print("All models processed. Now customizing layout...")
     customize_coeffs_heatmap_layout(fig, models_info)
     # fig.show()
-    save_dir = os.path.join(save_dir, "coeffs_heatmaps")
-    os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{elec_name}_lasso.html")
     fig.write_html(save_path)
     # print(f"!!!!!! Plotting complete. HTML file saved as {save_path} !!!!!!")
@@ -146,12 +147,17 @@ def plot_heatmap_single_elec_single_model(row_idx, elec_name, fig, max_alpha, mi
     non_zero_coeffs_row_indx = np.where(np.any(is_coeffs_nonzero, axis=1))[0]  # Get indices of non-zero rows
 
     x_values = np.linspace(-2, 2, is_coeffs_nonzero.shape[1])
-    row_labels = non_zero_coeffs_row_indx.astype(str)
+    row_labels = non_zero_coeffs_row_indx
+    z_values = is_coeffs_nonzero[non_zero_coeffs_row_indx, :]
+
+    sort_indices = np.argsort(-z_values.sum(axis=1)) # Sort by the number of non-zero coefficients in each row
+    z_values_sorted = z_values[sort_indices, :]
+    row_labels_sorted = row_labels[sort_indices]
 
     fig.add_trace(go.Heatmap(
-        z=is_coeffs_nonzero[non_zero_coeffs_row_indx, :].astype(int),
+        z=z_values_sorted.astype(int),
         x=x_values,
-        y=row_labels,
+        y=row_labels_sorted.astype(str),
         colorscale=[[0, '#e8e8e8'], [1, 'black']],
         showscale=False,
         # colorbar=dict(
