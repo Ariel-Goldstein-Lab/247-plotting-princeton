@@ -2,6 +2,8 @@ import argparse
 import glob
 import itertools
 import os
+import re
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,6 +14,7 @@ from tfsplt_utils import (
     get_fader_color,
     get_con_color,
     read_sig_file,
+    get_dir,
 )
 
 
@@ -387,6 +390,108 @@ def plot_average(args, df, pdf):
     return pdf
 
 
+def plot_args_summary(args, pdf):
+    """Plot a summary page with all command line arguments
+
+    Args:
+        args (namespace): commandline arguments
+        pdf (PDFPage): pdf with plotting results
+
+    Returns:
+        pdf (PDFPage): pdf with arguments summary page added
+    """
+    fig, ax = plt.subplots(figsize=args.fig_size)
+    ax.axis('off')  # Turn off axes for text-only page
+
+    # Create title
+    title_text = "Analysis Parameters Summary"
+    ax.text(0.5, 0.95, title_text, transform=ax.transAxes,
+            fontsize=16, fontweight='bold', ha='center')
+
+    # Add timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ax.text(0.5, 0.91, f"Generated: {timestamp}", transform=ax.transAxes,
+            fontsize=10, ha='center', style='italic')
+
+    # Convert args namespace to dictionary and format
+    args_dict = vars(args)
+
+    # Create formatted text for all arguments with better spacing
+    y_pos = 0.85
+    line_height = 0.035  # Increased line spacing
+    x_pos = 0.05
+    column_width = 0.45
+    max_line_length = 60  # Characters per line
+
+    items = list(args_dict.items())
+    mid_point = len(items) // 2
+
+    # First column
+    for i, (key, value) in enumerate(items[:mid_point]):
+        # Format the value for better readability
+        if isinstance(value, list):
+            if len(value) > 8:  # For long lists, show first few items
+                value_str = f"[{', '.join(map(str, value[:3]))}...] (len={len(value)})"
+            else:
+                value_str = str(value)
+        elif isinstance(value, str) and len(value) > 40:
+            value_str = f"{value[:37]}..."
+        else:
+            value_str = str(value)
+
+        # Wrap long lines
+        text_line = f"{key}: {value_str}"
+        if len(text_line) > max_line_length:
+            # Split long lines
+            key_part = f"{key}:"
+            value_part = value_str
+            ax.text(x_pos, y_pos, key_part, transform=ax.transAxes,
+                    fontsize=9, ha='left', fontweight='bold')
+            ax.text(x_pos + 0.02, y_pos - line_height * 0.7, value_part, transform=ax.transAxes,
+                    fontsize=8, ha='left', fontfamily='monospace')
+            y_pos -= line_height * 1.5
+        else:
+            ax.text(x_pos, y_pos, text_line, transform=ax.transAxes,
+                    fontsize=9, ha='left', fontfamily='monospace')
+            y_pos -= line_height
+
+    # Second column
+    y_pos = 0.85
+    x_pos = 0.52
+
+    for i, (key, value) in enumerate(items[mid_point:]):
+        # Format the value for better readability
+        if isinstance(value, list):
+            if len(value) > 8:  # For long lists, show first few items
+                value_str = f"[{', '.join(map(str, value[:3]))}...] (len={len(value)})"
+            else:
+                value_str = str(value)
+        elif isinstance(value, str) and len(value) > 40:
+            value_str = f"{value[:37]}..."
+        else:
+            value_str = str(value)
+
+        # Wrap long lines
+        text_line = f"{key}: {value_str}"
+        if len(text_line) > max_line_length:
+            # Split long lines
+            key_part = f"{key}:"
+            value_part = value_str
+            ax.text(x_pos, y_pos, key_part, transform=ax.transAxes,
+                    fontsize=9, ha='left', fontweight='bold')
+            ax.text(x_pos + 0.02, y_pos - line_height * 0.7, value_part, transform=ax.transAxes,
+                    fontsize=8, ha='left', fontfamily='monospace')
+            y_pos -= line_height * 1.5
+        else:
+            ax.text(x_pos, y_pos, text_line, transform=ax.transAxes,
+                    fontsize=9, ha='left', fontfamily='monospace')
+            y_pos -= line_height
+
+    pdf.savefig(fig)
+    plt.close()
+    return pdf
+
+
 def plot_electrodes(args, df, pdf):
     """Plot individual electrode encoding
 
@@ -399,6 +504,13 @@ def plot_electrodes(args, df, pdf):
         pdf (PDFPage): pdf with correct plots added
     """
     print("Plotting Individual Electrodes")
+
+    if 777 in args.sid:
+        elec_locations = pd.read_csv("/scratch/gpfs/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
+    else:
+        elec_locations = pd.read_csv("/scratch/gpfs/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
+
+    results = []
     for (electrode, sid), subdf in df.groupby(["electrode", "sid"], axis=0):
         fig, ax = plt.subplots(figsize=args.fig_size)
         for (label, _, key, _), values in subdf.iterrows():
@@ -413,6 +525,12 @@ def plot_electrodes(args, df, pdf):
                 linewidth=0.5, # Thinner line for individual electrodes
             )
 
+        real_sid = int(electrode.split("_",1)[0])  # Extract the real subject ID
+        real_electrode = electrode.split("_",1)[1]
+
+        # Dictionary to store peak info for this electrode
+        electrode_peaks = {'electrode': electrode, 'sid': sid, 'real_sid': real_sid, 'real_electrode': real_electrode}
+
         # Calculate and plot averages for each unique key
         for key_group, key_df in subdf.groupby(level=["label", "key"]):
             # Calculate the average across all rows for this key group
@@ -420,6 +538,16 @@ def plot_electrodes(args, df, pdf):
             avg_sem = key_df.sem(axis=0)
             map_key = (key_group[0], key_group[1])
             label = "-".join(map_key) + " (avg)"
+
+            # Find peak value and time
+            peak_idx = np.argmax(np.abs(avg_values))  # Index of peak (absolute value)
+            peak_value = avg_values.iloc[peak_idx]
+            peak_time = args.x_vals_show[peak_idx]
+
+            # Store peak info with column names based on key_group
+            key_name = f"{key_group[0]}_{key_group[1]}"
+            electrode_peaks[f"{key_name}_peak_value"] = peak_value
+            electrode_peaks[f"{key_name}_peak_time"] = peak_time
 
             # Plot the average with a thicker line
             ax.plot(
@@ -459,8 +587,28 @@ def plot_electrodes(args, df, pdf):
                 fig.bbox.ymax - arr_image.shape[0],
                 zorder=5,
             )
+        if 777 in args.sid:
+            loc = elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)][["princeton_class","NYU_class"]].iloc[0]
+            electrode_peaks["princeton_class"] = loc["princeton_class"]
+            electrode_peaks["NYU_class"] = loc["NYU_class"]
+        else:
+            loc = elec_locations[(elec_locations["sid"] == real_sid) & (elec_locations["elec_1"] == real_electrode)][["NYU_roi","roi_1","roi_2"]].iloc[0]
+            electrode_peaks["NYU_roi"] = loc["NYU_roi"]
+            electrode_peaks["roi_1"] = loc["roi_1"]
+            electrode_peaks["roi_2"] = loc["roi_2"]
+
+        fig.text(0.98, 0.02, loc, ha='right', va='bottom', fontsize=10)
+
+        # Add this electrode's peak info to results
+        results.append(electrode_peaks)
+
         pdf.savefig(fig)
         plt.close()
+
+    # Create DataFrame from results
+    peak_df = pd.DataFrame(results)
+    peak_df.to_csv(args.outfile.replace(".pdf", "_peaks.csv"), index=False)
+
     return pdf
 
 
