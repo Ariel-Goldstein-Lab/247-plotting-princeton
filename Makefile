@@ -140,7 +140,7 @@ LAG_TK_LABLS :=
 # Split Direction, if any (Choose how plots are split) (optional) (horizontal or vertical)
 # Split by, if any (Choose how lines are split into plots) (Only effective when Split is not empty) (optional) (labels or keys)
 # PLT_PARAMS := --lc-by labels --ls-by keys # plot for just one key (podcast plots)
-PLT_PARAMS := --lc-by keys --ls-by labels # --split horizontal --split-by keys # plot for prod+comp (247 plots)
+PLT_PARAMS := --lc-by labels --ls-by keys # --split horizontal --split-by keys # plot for prod+comp (247 plots)
 
 # y-axis limits (for individual plots) (leave it 0 for automatic)
 Y_LIMIT := 0 # 0 0.3
