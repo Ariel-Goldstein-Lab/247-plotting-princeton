@@ -22,8 +22,8 @@ from sklearn.neighbors import NearestNeighbors
 
 n_workers = 10
 nperms = 5000
-pdir = "/scratch/gpfs/zzada/247-encoding/results/podcast/"
-pdir = "/scratch/gpfs/kw1166/zaid-247-encoding/results/podcast/"
+pdir = "/scratch/gpfs/HASSON/zzada/247-encoding/results/podcast/"
+pdir = "/scratch/gpfs/HASSON/kw1166/zaid-247-encoding/results/podcast/"
 
 dirs = [
     "0shot-zz-podcast-full-777-gpt2-xl-e23/777/",
@@ -51,7 +51,7 @@ dirs = [
 
 
 # Create experiments from master list
-elecs = pd.read_csv("/scratch/gpfs/zzada/247-encoding/data/elec_masterlist.csv")
+elecs = pd.read_csv("/scratch/gpfs/HASSON/zzada/247-encoding/data/elec_masterlist.csv")
 cats = ["princeton_class", "NYU_class"]
 
 cats = ["NYU_class"]

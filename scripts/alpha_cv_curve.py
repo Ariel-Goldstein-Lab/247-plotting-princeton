@@ -9,19 +9,19 @@ def plot_alpha_cv_curve(alpha_range, elec_name, model):
 
 
 def parse_alpha_range(alpha_range, model):
-    with open(f'/scratch/gpfs/tk6637/princeton/temp_data/alpha_plots/{alpha_range}/checked_alphas.npy', 'rb') as f:
+    with open(f'/scratch/gpfs/HASSON/tk6637/princeton/temp_data/alpha_plots/{alpha_range}/checked_alphas.npy', 'rb') as f:
         alphas = np.load(f)
 
 
-    with open(f'/scratch/gpfs/tk6637/princeton/247-encoding/results/podcast/tk-podcast-777-{model}-lag2k-25-all/tk-200ms-777-lay13-con32-reglasso-alphas_{alpha_range}-all_data/{elec_name}_comp_best_l1_regs.npy', 'rb') as f:
+    with open(f'/scratch/gpfs/HASSON/tk6637/princeton/247-encoding/results/podcast/tk-podcast-777-{model}-lag2k-25-all/tk-200ms-777-lay13-con32-reglasso-alphas_{alpha_range}-all_data/{elec_name}_comp_best_l1_regs.npy', 'rb') as f:
         best_l1_regs = np.load(f)
 
-    with open(f'/scratch/gpfs/tk6637/princeton/247-encoding/results/podcast/tk-podcast-777-{model}-lag2k-25-all/tk-200ms-777-lay13-con32-reglasso-alphas_{alpha_range}-all_data/{elec_name}_comp_cv_scores.npy', 'rb') as f:
+    with open(f'/scratch/gpfs/HASSON/tk6637/princeton/247-encoding/results/podcast/tk-podcast-777-{model}-lag2k-25-all/tk-200ms-777-lay13-con32-reglasso-alphas_{alpha_range}-all_data/{elec_name}_comp_cv_scores.npy', 'rb') as f:
         cv_scores = np.load(f)
 
     # file_type = "best_l1_regs"
     # var_name = f"{file_type}_{elec_name}"
-    # with open(f'/scratch/gpfs/tk6637/princeton/247-encoding/results/podcast/tk-podcast-777-{model}-lag2k-25-all/tk-200ms-777-lay13-con32-reglasso-alphas_{alpha_range}-all_data/{elec_name}_comp_{file_type}.npy', 'rb') as f:
+    # with open(f'/scratch/gpfs/HASSON/tk6637/princeton/247-encoding/results/podcast/tk-podcast-777-{model}-lag2k-25-all/tk-200ms-777-lay13-con32-reglasso-alphas_{alpha_range}-all_data/{elec_name}_comp_{file_type}.npy', 'rb') as f:
     #     globals()[var_name] = np.load(f)
 
     return alphas, best_l1_regs, cv_scores
@@ -40,8 +40,8 @@ def plot_all_timepoints(alpha_range, elec_name, alphas, best_l1_regs, cv_scores)
                           '<b>CV Score:</b> %{y:.4f}<br>' +
                           '<extra></extra>'
         )
-        fig.write_html(f"/scratch/gpfs/tk6637/princeton/247-plotting/results/figures/alpha_plots/{alpha_range}/{elec_name}-alpha_cv_plot_time_{time_index}.html")
-        fig.write_image(f"/scratch/gpfs/tk6637/princeton/247-plotting/results/figures/alpha_plots/{alpha_range}/{elec_name}-alpha_cv_plot_time_{time_index}.png")
+        fig.write_html(f"/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/figures/alpha_plots/{alpha_range}/{elec_name}-alpha_cv_plot_time_{time_index}.html")
+        fig.write_image(f"/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/figures/alpha_plots/{alpha_range}/{elec_name}-alpha_cv_plot_time_{time_index}.png")
         # fig.show()
 
 if __name__ == '__main__':

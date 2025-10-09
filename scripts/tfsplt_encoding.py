@@ -513,9 +513,9 @@ def plot_electrodes(args, df, pdf):
     print("Plotting Individual Electrodes")
 
     if 777 in args.sid:
-        elec_locations = pd.read_csv("/scratch/gpfs/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
+        elec_locations = pd.read_csv("/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
     else:
-        elec_locations = pd.read_csv("/scratch/gpfs/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
+        elec_locations = pd.read_csv("/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
 
     results = []
     for (electrode, sid), subdf in df.groupby(["electrode", "sid"], axis=0):
