@@ -15,6 +15,7 @@ from tfsplt_utils import (
     get_con_color,
     read_sig_file,
     get_dir,
+    get_elec_locations,
 )
 
 
@@ -54,6 +55,7 @@ def arg_parser():
     parser.add_argument("--split", type=str, default=None)
     parser.add_argument("--split-by", type=str, default=None)
     parser.add_argument("--outfile", type=str, default="results/figures/tfs-encoding.pdf")
+    parser.add_argument("--plot-individuals", action="store_true", default=False, help="Plot individual electrode lines in addition to averages")
     args = parser.parse_args()
 
     return args
@@ -411,7 +413,7 @@ def plot_args_summary(args, pdf):
     ax.axis('off')  # Turn off axes for text-only page
 
     # Create title
-    title_text = "Analysis Parameters Summary"
+    title_text = f"Analysis Parameters Summary for sid {args.sid}"
     ax.text(0.5, 0.95, title_text, transform=ax.transAxes,
             fontsize=16, fontweight='bold', ha='center')
 
@@ -512,25 +514,21 @@ def plot_electrodes(args, df, pdf):
     """
     print("Plotting Individual Electrodes")
 
-    if 777 in args.sid:
-        elec_locations = pd.read_csv("/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
-    else:
-        elec_locations = pd.read_csv("/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
-
     results = []
     for (electrode, sid), subdf in df.groupby(["electrode", "sid"], axis=0):
         fig, ax = plt.subplots(figsize=args.fig_size)
-        for (label, _, key, _), values in subdf.iterrows():
-            map_key = (label, key)
-            label = "-".join(map_key)
-            ax.plot(
-                args.x_vals_show,
-                values,
-                # label=label,
-                color=args.cmap[map_key],
-                ls=args.smap[map_key],
-                linewidth=0.5, # Thinner line for individual electrodes
-            )
+        if args.plot_individuals:
+            for (label, _, key, _), values in subdf.iterrows():
+                map_key = (label, key)
+                label = "-".join(map_key)
+                ax.plot(
+                    args.x_vals_show,
+                    values,
+                    # label=label,
+                    color=args.cmap[map_key],
+                    ls=args.smap[map_key],
+                    linewidth=0.5, # Thinner line for individual electrodes
+                )
 
         real_sid = int(electrode.split("_",1)[0])  # Extract the real subject ID
         real_electrode = electrode.split("_",1)[1]
@@ -594,17 +592,11 @@ def plot_electrodes(args, df, pdf):
                 fig.bbox.ymax - arr_image.shape[0],
                 zorder=5,
             )
-        if 777 in args.sid:
-            loc = elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)][["princeton_class","NYU_class"]].iloc[0]
-            electrode_peaks["princeton_class"] = loc["princeton_class"]
-            electrode_peaks["NYU_class"] = loc["NYU_class"]
-        else:
-            loc = elec_locations[(elec_locations["sid"] == real_sid) & (elec_locations["elec_1"] == real_electrode)][["NYU_roi","roi_1","roi_2"]].iloc[0]
-            electrode_peaks["NYU_roi"] = loc["NYU_roi"]
-            electrode_peaks["roi_1"] = loc["roi_1"]
-            electrode_peaks["roi_2"] = loc["roi_2"]
 
-        fig.text(0.98, 0.02, loc, ha='right', va='bottom', fontsize=10)
+        # print(f"Plotting {real_sid} {real_electrode}")
+        # print(elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)])
+
+        add_ele_loc_text(args, fig, real_sid, real_electrode, electrode_peaks)
 
         # Add this electrode's peak info to results
         results.append(electrode_peaks)
@@ -617,6 +609,34 @@ def plot_electrodes(args, df, pdf):
     peak_df.to_csv(args.outfile.replace(".pdf", "_peaks.csv"), index=False)
 
     return pdf
+
+
+def add_ele_loc_text(args, fig, real_sid, real_electrode, electrode_peaks=None):
+    elec_locations = get_elec_locations(args.sid)
+
+    if 777 in args.sid:
+        loc = elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)][
+            ["princeton_class", "NYU_class"]].iloc[0]
+        if electrode_peaks is not None:
+            electrode_peaks["princeton_class"] = loc["princeton_class"]
+            electrode_peaks["NYU_class"] = loc["NYU_class"]
+    else:
+        loc_df = elec_locations[(elec_locations["sid"] == real_sid) & (elec_locations["elec_1"] == real_electrode)][
+            ["NYU_roi", "roi_1", "roi_2"]]
+        if len(loc_df) == 0:
+            print(f"Warning: No location data found for sid={real_sid}, electrode={real_electrode}")
+            loc = {"NYU_roi": "Unknown", "roi_1": "Unknown", "roi_2": "Unknown"}
+        else:
+            loc = loc_df.iloc[0]
+        if electrode_peaks is not None:
+            electrode_peaks["NYU_roi"] = loc["NYU_roi"]
+            electrode_peaks["roi_1"] = loc["roi_1"]
+            electrode_peaks["roi_2"] = loc["roi_2"]
+            electrode_peaks["NYU_roi"] = loc["NYU_roi"]
+            electrode_peaks["roi_1"] = loc["roi_1"]
+            electrode_peaks["roi_2"] = loc["roi_2"]
+
+    fig.text(0.98, 0.02, loc, ha='right', va='bottom', fontsize=10)
 
 
 def plot_split_args(args):
@@ -723,19 +743,33 @@ def plot_electrodes_split(args, df, pdf):
         )
         for _, (plot, subsubdf) in zip(axes, subdf.groupby(plot_split)):
             ax = axes[plot_lists.index(plot)]
-            for row, values in subsubdf.iterrows():
-                if args.split_by == "keys":
-                    line = row[0]
-                    map_key = (line, plot)
-                else:
-                    line = row[2]
-                    map_key = (plot, line)
+            if args.plot_individuals:
+                for row, values in subsubdf.iterrows():
+                    if args.split_by == "keys":
+                        line = row[0]
+                        map_key = (line, plot)
+                    else:
+                        line = row[2]
+                        map_key = (plot, line)
+                    ax.plot(
+                        args.x_vals_show,
+                        values,
+                        # label=line,
+                        color=args.cmap[map_key],
+                        ls=args.smap[map_key],
+                        linewidth=0.5,  # Thinner line for individual electrodes
+                    )
+            for key_group, key_df in subsubdf.groupby(level=["label", "key"]):
+                map_key = (key_group[0], key_group[1])
+                label = "-".join(map_key) + " (avg)"
+                avg_values = key_df.mean(axis=0)
                 ax.plot(
                     args.x_vals_show,
-                    values,
-                    label=line,
+                    avg_values,
+                    label=f"{label} ({len(key_df)})",
                     color=args.cmap[map_key],
-                    ls=args.smap[map_key],
+                    # ls=args.smap[map_key],
+                    linewidth=3,  # Thicker line for average
                 )
             if len(args.lag_ticks) != 0:
                 ax.set_xticks(args.lag_ticks)
@@ -760,6 +794,11 @@ def plot_electrodes_split(args, df, pdf):
                 fig.bbox.ymax - arr_image.shape[0],
                 zorder=5,
             )
+
+        real_sid = int(electrode.split("_",1)[0])  # Extract the real subject ID
+        real_electrode = electrode.split("_",1)[1]
+        add_ele_loc_text(args, fig, real_sid, real_electrode)
+
         pdf.savefig(fig)
         plt.close()
     return pdf

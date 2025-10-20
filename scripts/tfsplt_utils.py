@@ -191,7 +191,7 @@ def get_fader_color(c1, c2, num):
     return colors
 
 def get_dir(path_ending):
-    """Get the path a directory. Used to allow running through Makefile or through script directly (e.g. for debugging)"""
+    """Get the path a directory. Used to allow running through Makefile-rafi-orig or through script directly (e.g. for debugging)"""
     current_dir = os.getcwd()
     # Check if we're in the main directory (with data/ as a direct subdirectory)
     if os.path.isdir(os.path.join(current_dir, path_ending)):
@@ -202,3 +202,87 @@ def get_dir(path_ending):
     # If neither condition is met, raise an error
     else:
         raise FileNotFoundError(f"Could not locate the data directory ({path_ending})")
+
+def get_recording_type(sid):
+    recording_type = "tfs"
+    if sid == 777:
+        recording_type = "podcast"
+    return recording_type
+
+def load_electrode_names(filter_type):
+    electrode_names_csv_path = None
+    if filter_type == 160 or filter_type == "160":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_160.csv"
+    elif filter_type == 50 or filter_type == "50":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_777_glove_elecs.csv"
+    elif filter_type == 39 or filter_type == "39":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/gemma_scope_sig_elec_alphas--0.7_0.27_30_enc_over_0.1.csv"
+    elif filter_type == "IFG":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_ifg.csv"
+    elif filter_type == "IFG160":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_160ifg.csv"
+    elif filter_type == "STG":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_stg.csv"
+    elif filter_type == "STG160":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_160stg.csv"
+    if electrode_names_csv_path:
+        electrode_names_df = pd.read_csv(electrode_names_csv_path)
+        electrode_names_df["full_elec_name"] = electrode_names_df["subject"].astype(str) + "_" + electrode_names_df[
+            "electrode"]
+    else:
+        raise ValueError(f"Unknown filter_type: {filter_type}. Please provide a valid filter_type.")
+
+    return electrode_names_df
+
+def get_encoding_and_coeffs_paths(sid, model_name, layer, context, min_alpha, max_alpha, num_alphas, full_elec_name, mode):
+    """
+    Get paths to encoding and coeffs files for a given subject, model, layer, context, alpha range, electrode, and mode.
+    :param model_name: full model name (e.g., "gemma-scope-2b-pt-res-canonical")
+    :param full_elec_name: long electrode name (e.g., "777_LGB2")
+    :param mode: "comp" or "prod"
+    :return:
+    """
+    recording_type = get_recording_type(sid)
+    model_path = f"{get_dir('data')}/encoding/{recording_type}/tk-{recording_type}-{sid}-{model_name}-lag2k-25-all"
+
+    # Prep general paths
+    kfolds_path_template = f"{model_path}/tk-200ms-{sid}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}/{full_elec_name}_{mode}{{ending}}"
+    all_data_path_template = f"{model_path}/tk-200ms-{sid}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}-all_data/{full_elec_name}_{mode}{{ending}}"
+
+    # Prep encodings paths
+    kfolds_enc_path = kfolds_path_template.format(ending=".csv")
+    all_data_enc_path = all_data_path_template.format(ending=".csv")
+
+    # Prep coeffs paths
+    kfolds_coeffs_path = kfolds_path_template.format(ending="_coeffs.npy")
+    all_data_coeffs_path = all_data_path_template.format(ending="_coeffs.npy")
+
+    return (kfolds_enc_path, kfolds_coeffs_path,
+            all_data_enc_path, all_data_coeffs_path)
+
+def get_elec_locations(sid):
+    if "777" in str(sid):
+        elec_locations = pd.read_csv(
+            "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
+        elec_locations["full_elec_name"] = elec_locations["subject"].astype(str) + "_" + elec_locations["name"]
+    else:
+        elec_locations = pd.read_csv(
+            "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
+        elec_locations.rename(columns={"sid": "subject", "elec_1": "name"}, inplace=True)
+    elec_locations["full_elec_name"] = elec_locations["subject"].astype(str) + "_" + elec_locations["name"]
+    return elec_locations
+
+def load_electrode_names_and_locations(sid, filter_type):
+    electrode_names_df = load_electrode_names(filter_type)
+    elec_locations = get_elec_locations(sid)
+    elec_locations.drop(columns=["subject", "name"], inplace=True)
+    merged_df = pd.merge(electrode_names_df, elec_locations, on="full_elec_name", how="left")
+    return merged_df
+
+def amount_coeffs_per_timepoint_in_agreement_kfolds(kfolds_coeffs, threshold=8):
+    kfolds_non_zero_mask = kfolds_coeffs != 0
+    kfold_coeffs_count = kfolds_non_zero_mask[:, :, :].sum(axis=0) # For each timepoint, for each coeff, how many kfolds is it non-zero in
+    reliable_coeffs_count  = (kfold_coeffs_count >= threshold).sum(axis=0) # For each timepoint, how many coeffs are non-zero in at least `threshold` kfolds
+    return reliable_coeffs_count
+
+

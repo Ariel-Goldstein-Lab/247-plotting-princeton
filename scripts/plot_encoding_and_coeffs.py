@@ -3,6 +3,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from tfsplt_utils import get_elec_locations, get_recording_type, load_electrode_names, amount_coeffs_per_timepoint_in_agreement_kfolds
 from plotly.subplots import make_subplots
 
 
@@ -11,7 +12,8 @@ def plot_encoding_and_coeffs_lines(patient, mode, models_info, filter_type, min_
     """
     Main function to plot the encoding and coefficients comparison.
     """
-    models_info, electrode_names_df, recording_type = load_general_files(models_info, filter_type, patient)
+    electrode_names_df = load_electrode_names(filter_type)
+    models_info = add_models_path(models_info, patient)
     # electrode_names_df = electrode_names_df[:3]  # For testing, remove this line for all electrodes
 
     amount_of_electrodes = len(electrode_names_df["full_elec_name"])
@@ -49,11 +51,12 @@ def plot_encoding_and_coeffs_lines(patient, mode, models_info, filter_type, min_
 
 
 def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, min_alpha, max_alpha, num_alphas,
-                                       p_threshold, save_dir, save_ending):
+                                       p_threshold, emb_mod, to_plot, save_dir, save_ending):
     """
     Plot encoding and absolute coefficient counts on the same plot with dual y-axes.
     """
-    models_info, electrode_names_df, recording_type = load_general_files(models_info, filter_type, patient)
+    electrode_names_df = load_electrode_names(filter_type)
+    models_info = add_models_path(models_info, patient)
 
     amount_of_electrodes = len(electrode_names_df["full_elec_name"])
     # If filter type is int:
@@ -66,19 +69,14 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, 
         real_sid = int(elec_name.split("_", 1)[0])  # Extract the real subject ID
         real_electrode = elec_name.split("_", 1)[1]
 
-        # if "777" in sid:
-        elec_locations = pd.read_csv(
-            "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
-        # else:
-        #     elec_locations = pd.read_csv(
-        #         "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
+        elec_locations = get_elec_locations(patient)
         loc = elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)][
             ["princeton_class", "NYU_class"]]
 
         # Plot on the right side of the plot
         loc_text = f"Locations: Princeton - {loc['princeton_class'].values[0]}, NYU - {loc['NYU_class'].values[0]}"
 
-        subplot_titles.append(f"Encoding & Coeffs - {patient}, {elec_name} ({mode}) <br><span style='font-size: 80%;'><i>{loc_text}</i></span>")
+        subplot_titles.append(f"{patient}, {elec_name} ({mode}), <span style='font-size: 80%;'><i>{loc_text}</i></span>")
 
     max_vertical_spacing = 1 / (amount_of_electrodes - 1) if amount_of_electrodes > 1 else 0
     chosen_vertical_spacing = max_vertical_spacing * 0.25  # Use 25% of maximum
@@ -92,6 +90,14 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, 
         shared_xaxes=True
     )
 
+    # Add a title to the entire figure
+    fig.update_layout(
+        title_text=save_ending,  # Replace with your actual title
+        # title_font_size=20,  # Optional: adjust font size
+        title_x=0.5,  # Optional: centers the title (0-1 scale)
+        title_font_family="Arial"  # Optional: specify font family
+    )
+
     encoding_all_electrodes = {} # Dict from line type to list of encodings for each electrode
     coeffs_all_electrodes = {} # Dict from line type to list of coeffs for each electrode
 
@@ -99,7 +105,7 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, 
         print(f"Processing electrode {elec_name} ({row_idx + 1}/{amount_of_electrodes})")
         for model_name in models_info.keys():
             encoding_results, coeff_nums, plots_data = plot_single_elec_single_model_dual_axis(row_idx + 1, elec_name, model_name, models_info, patient, mode,
-                                                   min_alpha, max_alpha, num_alphas, fig, filter_type, p_threshold=p_threshold)
+                                                                                               min_alpha, max_alpha, num_alphas, fig, filter_type, emb_mod, to_plot, p_threshold=p_threshold)
             for line_type in encoding_results.keys():
                 if line_type not in encoding_all_electrodes:
                     encoding_all_electrodes[line_type] = []
@@ -109,16 +115,36 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, 
                     coeffs_all_electrodes[line_type] = []
                 coeffs_all_electrodes[line_type].append(coeff_nums[line_type])
 
+    add_general_mean_and_std(coeffs_all_electrodes, encoding_all_electrodes, fig, plots_data)
+
+    print("All models processed. Now customizing layout...")
+    customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig)
+    fig.show()
+    save_path = os.path.join(save_dir, f"{f'{save_ending}_' if save_ending else ''}encoding_and_coeffs_dual_axis.html")
+    fig.write_html(save_path)
+
+    print(f"!!!!!! Plotting complete. HTML file saved as {save_path} !!!!!!")
+
+
+def add_general_mean_and_std(coeffs_all_electrodes, encoding_all_electrodes, fig, plots_data):
+    max_encoding = 0
     # Plot mean and var encoding across electrodes for each line type
     for line_type in encoding_all_electrodes.keys():
-        color = [('248', '187', '208'), ('240', '98', '146'), ('233', '30', '99'),('194', '24', '91'), ('136', '14', '79')][plots_data[line_type]["color_index"]]
+        color = \
+        [('248', '187', '208'), ('240', '98', '146'), ('233', '30', '99'), ('194', '24', '91'), ('136', '14', '79')][
+            plots_data[line_type]["color_index"]]
         enc_name = plots_data[line_type]['enc_name']
-        dash = "solid"  # plots_data[line_type]["dash"]
+        dash = plots_data[line_type]["dash"]
 
         mean_encoding = np.mean(encoding_all_electrodes[line_type], axis=0)
         std_encoding = np.std(encoding_all_electrodes[line_type], axis=0)
         y_enc_upper = mean_encoding + std_encoding
         y_enc_lower = mean_encoding - std_encoding
+
+        if line_type == "kfolds": # Don't use all_data since it is biased high due to overfitting
+            max_kfolds_encoding = np.max(mean_encoding)
+        # max_encoding = max(max_encoding, np.max(mean_encoding))
+        max_encoding = max(max_encoding, np.max(y_enc_upper))
 
         x = np.linspace(-2, 2, mean_encoding.shape[-1])
 
@@ -148,20 +174,25 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, 
             yaxis="y1"
         ), row=1, col=1, secondary_y=False)
 
-        # fig.update_layout(
-        #     yaxis2=dict(range=[None, 1000])  # Auto min, max at 1000
-        # )
 
+    max_coeffs = 0
     # Plot mean and var coeffs across electrodes for each line type
     for line_type in coeffs_all_electrodes.keys():
-        color = [('248', '187', '208'), ('240', '98', '146'), ('233', '30', '99'), ('194', '24', '91'), ('136', '14', '79')][plots_data[line_type]["color_index"]]
+        # color = [('248', '187', '208'), ('240', '98', '146'), ('233', '30', '99'), ('194', '24', '91'), ('136', '14', '79')][plots_data[line_type]["color_index"]]
+        color = ('100', '181', '246')  # Light blue
         coeffs_name = plots_data[line_type]['coeffs_name']
-        dash = "dot"
+        dash = plots_data[line_type]["dash"]
 
         mean_coeffs = np.mean(coeffs_all_electrodes[line_type], axis=0)
         std_coeffs = np.std(coeffs_all_electrodes[line_type], axis=0)
         y_coeff_upper = mean_coeffs + std_coeffs
         y_coeff_lower = mean_coeffs - std_coeffs
+
+        if line_type == "reliable_kfolds":
+            max_reliable_kfolds_coeffs = np.max(mean_coeffs)
+
+        max_coeffs = max(max_coeffs, np.max(mean_coeffs))
+        # max_coeffs = max(max_coeffs, np.max(y_coeff_upper))
 
         x = np.linspace(-2, 2, mean_coeffs.shape[-1])
 
@@ -190,20 +221,30 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, 
             yaxis="y2"
         ), row=1, col=1, secondary_y=True)
 
+    fig.add_shape(type='line',
+                  x0=-2, x1=2,
+                  y0=0, y1=0,
+                  line=dict(color='black', width=2), row=1, col=1)
 
+    # Add vertical line at x=0
+    fig.add_shape(type='line',
+                  x0=0, x1=0,
+                  y0=-0.1, y1=max_encoding + 0.01,
+                  line=dict(color='black', width=2), row=1, col=1)
 
-    print("All models processed. Now customizing layout...")
-    customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig)
-    fig.show()
-    save_path = os.path.join(save_dir, f"{f'{save_ending}_' if save_ending else ''}encoding_and_coeffs_dual_axis.html")
-    fig.write_html(save_path)
-
-    print(f"!!!!!! Plotting complete. HTML file saved as {save_path} !!!!!!")
+    y2_min = -(max_reliable_kfolds_coeffs + 2) * (abs(-0.025) / max_kfolds_encoding + 0.01)  # Try to calibrate 0 being in the same place
+    #
+    # fig.update_yaxes(range=[y2_min, max_coeffs + 10], row=1, col=1, secondary_y=True)
+    fig.update_layout(
+        yaxis=dict(range=[-0.025, max_kfolds_encoding + 0.01]),
+        yaxis2=dict(range=[y2_min, max_reliable_kfolds_coeffs + 2]),
+    )
 
 
 def plot_coeffs_heatmap(patient, mode, models_info, filter_type, min_alpha, max_alpha, num_alphas, p_threshold, sort_by,
                         save_dir, save_ending):
-    models_info, electrode_names_df, recording_type = load_general_files(models_info, filter_type, patient)
+    electrode_names_df = load_electrode_names(filter_type)
+    models_info = add_models_path(models_info, patient)
     save_dir = os.path.join(save_dir, f"coeffs_heatmaps_sorted_by_{sort_by}{f'_{save_ending}' if save_ending else ''}")
     os.makedirs(save_dir, exist_ok=True)
 
@@ -504,7 +545,12 @@ def customize_encoding_and_coeffs_layout(amount_of_electrodes, fig):
 
 
 def plot_single_elec_single_model_dual_axis(row_idx, elec_name, model_name, models_info, patient, mode, min_alpha,
-                                           max_alpha, num_alphas, fig, filter_type, p_threshold=0.05):
+                                            max_alpha, num_alphas, fig, filter_type, emb_mod, to_plot=None, p_threshold=0.05):
+    if to_plot is None:
+        to_plot = ["kfolds", "all_data"]  # , "lasso", "ols", "corr"]
+    if "kfolds" in to_plot:
+        to_plot.append("reliable_kfolds")  # Always add reliable kfolds if kfolds is plotted
+
     show_legend = True if row_idx == 1 else False
     model_short_name = models_info[model_name]['model_short_name']
 
@@ -514,15 +560,18 @@ def plot_single_elec_single_model_dual_axis(row_idx, elec_name, model_name, mode
      lasso_enc_path, lasso_coeffs_path,
      ols_enc_path, ols_coeffs_path,
      pvals_names_path, pvals_combined_corrected_path) = prep_paths(elec_name, max_alpha, min_alpha, mode, model_name,
-                                                                   models_info, num_alphas, patient, filter_type)
+                                                                   models_info, num_alphas, patient, filter_type, emb_mod)
 
     plots_data = {
-        "kfolds": {"dash": "solid", 'color_index': 1, "name": f"Kfolds Lasso {model_short_name}",
-                   "enc_ending": "(r)", "enc_name": f"Kfolds Lasso Encoding {model_short_name} (r)",
+        "kfolds": {"dash": "solid", 'color_index': 1, "name": f"Kfolds {model_short_name}",
+                   "enc_ending": "(r)", "enc_name": f"Kfolds Encoding {model_short_name} (r)",
                    "enc_path": kfolds_lasso_enc_path,
-                   "coeffs_ending": "(-)", "coeffs_name": f"Significant in All Lasso Kfolds of {model_short_name}",
+                   "coeffs_ending": "(avg nonzero)", "coeffs_name": f"Kfolds Avg Non Zero of {model_short_name}",
                    "coeffs_path": kfolds_lasso_coeffs_path},
-        "all_data": {"dash": "longdash", 'color_index': 2, "name": f"All Data {model_short_name}",
+        "reliable_kfolds": {"dash": "dash", 'color_index': 3, "name": f"Reliable Kfolds {model_short_name}",
+                   "coeffs_ending": "(avg nonzero)", "coeffs_name": f"Reliable Kfolds Non Zero of {model_short_name}",
+                   "coeffs_path": kfolds_lasso_coeffs_path}, # Only coeffs, no encoding
+        "all_data": {"dash": "dot", 'color_index': 2, "name": f"All Data {model_short_name}",
                      "enc_ending": "(r)", "enc_name": f"All Data Encoding {model_short_name} (r)",
                      "enc_path": all_data_enc_path,
                      "coeffs_ending": "(nonzero)", "coeffs_name": f"All Data Non Zero of {model_short_name}",
@@ -547,6 +596,8 @@ def plot_single_elec_single_model_dual_axis(row_idx, elec_name, model_name, mode
     coeff_nums = {}
 
     for line_type in plots_data.keys():
+        if line_type not in to_plot:
+            continue
         encoding = plot_encoding_dual_axis(row_idx, model_name, models_info, line_type, plots_data, show_legend, fig)
         if encoding is not None:
             encoding_results[line_type] = encoding
@@ -622,16 +673,18 @@ def plot_single_elec_single_model(row_idx, elec_name, model_name, models_info, p
                     type="absolute", p_threshold=p_threshold)
 
 
-def prep_paths(elec_name, max_alpha, min_alpha, mode, model_name, models_info, num_alphas, patient, filter_type=None):
+def prep_paths(elec_name, max_alpha, min_alpha, mode, model_name, models_info, num_alphas, patient, filter_type=None, emb_mod=None):
     model_path = models_info[model_name]['model_path']
     layer = models_info[model_name]['layer']
     context = models_info[model_name]['context']
 
+    file_suffix = f"-mod_{emb_mod}" if emb_mod else ""
+
     # Prep general paths
-    kfolds_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}/{elec_name}_{mode}{{ending}}"
-    kfolds_train_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}_train/{elec_name}_{mode}{{ending}}"
-    all_data_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}-all_data/{elec_name}_{mode}{{ending}}"
-    sig_coeffs_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}-sig_coeffs/{elec_name}_{mode}{{ending}}"
+    kfolds_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}{file_suffix}/{elec_name}_{mode}{{ending}}"
+    kfolds_train_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}{file_suffix}_train/{elec_name}_{mode}{{ending}}"
+    all_data_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}-all_data{file_suffix}/{elec_name}_{mode}{{ending}}"
+    sig_coeffs_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}-sig_coeffs{file_suffix}/{elec_name}_{mode}{{ending}}"
     corr_path_template = f"{model_path}/tk-200ms-{patient}-lay{layer}-con{context}-corr_coeffs"
 
     # Prep encodings paths
@@ -818,7 +871,7 @@ def plot_encoding_dual_axis(row_idx, model_name, models_info, line_type, plots_d
 
     color = models_info[model_name]['colors'][plots_data[line_type]["color_index"]]
     enc_name = plots_data[line_type]['enc_name']
-    dash = "solid" #plots_data[line_type]["dash"]
+    dash = plots_data[line_type]["dash"]
     general_name = plots_data[line_type]['name']
 
     encoding_path = plots_data[line_type]["enc_path"]
@@ -877,19 +930,48 @@ def plot_coeffs_dual_axis(row_idx, model_name, models_info, line_type, plots_dat
     if "coeffs_path" not in plots_data[line_type] or plots_data[line_type]['coeffs_path'] is None:
         return
 
-    color = models_info[model_name]['colors'][plots_data[line_type]["color_index"]]
-    dash = "dot" #plots_data[line_type]["dash"]
+    # color = models_info[model_name]['colors'][plots_data[line_type]["color_index"]]
+    color = ('100', '181', '246')  # Light blue color
+    dash = plots_data[line_type]["dash"]
     coeffs_name = plots_data[line_type]['coeffs_name']
     coeffs_path = plots_data[line_type]["coeffs_path"]
     general_name = plots_data[line_type]['name']
     embedding_size = models_info[model_name]['embedding_size']
 
     num_of_coeffs = None
-    if line_type.startswith("kfolds"):
-        return  # Skip kfolds for coeffs in dual axis for now
+
     if not os.path.exists(coeffs_path):
         print(f"File not found: {coeffs_path}")
         return
+    if line_type == "kfolds":
+        coeffs = np.load(coeffs_path)
+        non_zero_counts = np.count_nonzero(coeffs, axis=1)
+        coeffs_mean = non_zero_counts.mean(axis=0)
+        coeffs_std = non_zero_counts.std(axis=0)
+
+        y_upper = coeffs_mean + coeffs_std
+        y_lower = coeffs_mean - coeffs_std
+
+        x = np.linspace(-2, 2, coeffs_mean.shape[-1])
+
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([x, x[::-1]]),
+            y=np.concatenate([y_upper, y_lower[::-1]]),
+            fill='toself',
+            fillcolor=f"rgba({','.join(color)},0.2)",
+            line=dict(color='rgba(255,255,255,0)'),
+            hoverinfo="skip",
+            showlegend=False,
+            legendgroup=coeffs_name,
+            name='±1 SD',
+            yaxis="y2"
+        ), row=row_idx + 1, col=1, secondary_y=True)
+
+        num_of_coeffs = coeffs_mean
+    if line_type =="reliable_kfolds":
+        coeffs = np.load(coeffs_path)
+        num_of_coeffs = amount_coeffs_per_timepoint_in_agreement_kfolds(coeffs, threshold=10)
+
 
     if line_type.startswith("all_data"):
         coeffs = np.load(coeffs_path)
@@ -920,27 +1002,20 @@ def plot_coeffs_dual_axis(row_idx, model_name, models_info, line_type, plots_dat
         x=x,
         y=num_of_coeffs,
         mode='lines',
-        name="#Coeffs for " + general_name + " " + plots_data[line_type]["coeffs_ending"],
+        name="#Coeffs - " + general_name + " " + plots_data[line_type]["coeffs_ending"],
         legendgroup=coeffs_name,
         line=dict(color=f"rgb({','.join(color)})", width=2, dash=dash),
         showlegend=show_legend,
         yaxis="y2"
     ), row=row_idx+1, col=1, secondary_y=True)
-    fig.update_layout(
-        yaxis2=dict(range=[-140, 700])  # Auto min, max at 1000
-    )
+    fig.update_yaxes(range=[-140, 700], row=row_idx+1, col=1, secondary_y=True)
     return num_of_coeffs
 
 # def add_loc_to_plot(row_idx, fig, elec_name):
 #     real_sid = int(elec_name.split("_", 1)[0])  # Extract the real subject ID
 #     real_electrode = elec_name.split("_", 1)[1]
 #
-#     # if "777" in sid:
-#     elec_locations = pd.read_csv(
-#         "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
-#     # else:
-#     #     elec_locations = pd.read_csv(
-#     #         "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/paper-whisper/data/base_df.csv")
+#     elec_locations = get_elec_locations(sid)
 #     loc = elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)][
 #         ["princeton_class", "NYU_class"]]
 #
@@ -981,8 +1056,16 @@ def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig):
 
     # Set axis labels and properties
     for i in range(1, amount_of_electrodes + 2):
-        fig.update_yaxes(title="Correlation (r)", row=i, col=1, secondary_y=False)
-        fig.update_yaxes(title="Number of Coeffs", range=[-140, 700], row=i, col=1, secondary_y=True)
+        fig.update_yaxes(title="Correlation (r)",
+                         title_font=dict(color='rgb(240, 98, 146)'),
+                         tickfont=dict(color='rgb(240, 98, 146)'),
+                         linecolor='rgb(240, 98, 146)',
+                         row=i, col=1, secondary_y=False)
+        fig.update_yaxes(title="Number of Coeffs",
+                         title_font=dict(color='rgb(100,181,246)'),  # Light blue
+                         tickfont=dict(color='rgb(100,181,246)'),  # Light blue
+                         linecolor='rgb(100,181,246)',
+                         row=i, col=1, secondary_y=True)
 
     fig.update_xaxes(title="Time (s)", showgrid=True)
     fig.update_yaxes(showgrid=True, secondary_y=False)
@@ -999,49 +1082,20 @@ def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig):
             y=1,
             xanchor="left",
             x=1.02
+        ),
+        hoverlabel=dict(
+            namelength=-1  # Set to -1 to show the full name
         )
     )
 
 
-def load_general_files(models_info, filter_type, patient):
-    recording_type = get_recording_type(patient)
-    electrode_names_csv_path = None
-    if filter_type == 160:
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast_160.csv"
-    elif filter_type == 50:
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast_777_glove_elecs.csv"
-    elif filter_type == 39:
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/gemma_scope_sig_elec_alphas--0.7_0.27_30_enc_over_0.1.csv"
-    elif filter_type == "IFG":
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast_ifg.csv"
-    elif filter_type == "IFG160":
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast_160ifg.csv"
-    elif filter_type == "STG":
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast_stg.csv"
-    elif filter_type == "STG160":
-        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast_160stg.csv"
-    if electrode_names_csv_path:
-        electrode_names_df = pd.read_csv(electrode_names_csv_path)
-        electrode_names_df["full_elec_name"] = electrode_names_df["subject"].astype(str) + "_" + electrode_names_df[
-            "electrode"]
 
-    get_models_path(models_info, patient, recording_type)
-
-    return models_info, electrode_names_df, recording_type
-
-
-def get_models_path(models_info, patient, recording_type):
+def add_models_path(models_info, sid):
+    recording_type = get_recording_type(sid)
     for model_name in models_info.keys():
-        model_path = f"../data/encoding/{recording_type}/tk-{recording_type}-{patient}-{model_name}-lag2k-25-all"
+        model_path = f"../data/encoding/{recording_type}/tk-{recording_type}-{sid}-{model_name}-lag2k-25-all"
         models_info[model_name]['model_path'] = model_path
-
-
-def get_recording_type(patient):
-    recording_type = "tfs"
-    if patient == 777:
-        recording_type = "podcast"
-    return recording_type
-
+    return models_info
 
 if __name__ == '__main__':
     # Choose parameters:
@@ -1070,12 +1124,15 @@ if __name__ == '__main__':
 
     p_threshold = 0.05
 
+    emb_mod = None #"shift-emb"
+    to_plot = None #["all_data"]#, "kfolds"] # Options: "kfolds", "reliable_kfolds", "all_data", "lasso", "ols", "corr" or None
+
     save_dir = "../results/figures/coeffs_analysis"
-    save_ending = f"{filter_type}_filter-alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}"  # Optional, can be empty string if not needed
+    save_ending = f"{filter_type}_filter-alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}{f'_{emb_mod}' if emb_mod else ''}"  # Optional, can be empty string if not needed
     sort_coeffs_by = "first_then_last_then_sum"  # Options: "sum", "first_then_last_then_sum", "first_true", "last_true", "neuron_index", "raster"
 
     # plot_encoding_and_coeffs_lines(patient, mode, models_info, filter_type, min_alpha, max_alpha, amount_of_alphas,
     #                                p_threshold, save_dir, save_ending)
     plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, min_alpha, max_alpha, amount_of_alphas,
-                                       p_threshold, save_dir, save_ending)
+                                       p_threshold, emb_mod, to_plot, save_dir, save_ending)
     # plot_coeffs_heatmap(patient, mode, models_info, filter_type, min_alpha, max_alpha, amount_of_alphas, p_threshold, sort_coeffs_by, save_dir, save_ending)
