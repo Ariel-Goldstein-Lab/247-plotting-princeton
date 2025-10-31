@@ -621,7 +621,7 @@ def add_ele_loc_text(args, fig, real_sid, real_electrode, electrode_peaks=None):
             electrode_peaks["princeton_class"] = loc["princeton_class"]
             electrode_peaks["NYU_class"] = loc["NYU_class"]
     else:
-        loc_df = elec_locations[(elec_locations["sid"] == real_sid) & (elec_locations["elec_1"] == real_electrode)][
+        loc_df = elec_locations[(elec_locations["subject"] == real_sid) & (elec_locations["name"] == real_electrode)][
             ["NYU_roi", "roi_1", "roi_2"]]
         if len(loc_df) == 0:
             print(f"Warning: No location data found for sid={real_sid}, electrode={real_electrode}")
