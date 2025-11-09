@@ -58,7 +58,7 @@ def plot_encoding_and_coeffs_lines(patient, mode, models_info, filter_type, min_
 
 
 def plot_encoding_and_coeffs_dual_axis(patient, mode, models_info, filter_type, min_alpha, max_alpha, num_alphas,
-                                       p_threshold, emb_mod, to_plot, save_dir, save_ending):
+                                       p_threshold, reliable_kfolds_threshold, emb_mod, to_plot, save_dir, save_ending):
     """
     Plot encoding and absolute coefficient counts on the same plot with dual y-axes.
     """
