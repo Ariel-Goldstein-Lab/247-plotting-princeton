@@ -238,7 +238,7 @@ def load_electrode_names(filter_type):
 
     return electrode_names_df
 
-def get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context, min_alpha, max_alpha, num_alphas, full_elec_name, mode):
+def get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context, min_alpha, max_alpha, num_alphas, full_elec_name, mode, filter_type):
     """
     Returns paths to encoding and coeffs files for a given electrode for a specific subject, model, layer, context, alpha range, and mode.
     :param model_name: full model name (e.g., "gemma-scope-2b-pt-res-canonical")
@@ -252,6 +252,7 @@ def get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context, min
     # Prep general paths
     kfolds_path_template = f"{model_path}/tk-200ms-{sid}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}/{full_elec_name}_{mode}{{ending}}"
     all_data_path_template = f"{model_path}/tk-200ms-{sid}-lay{layer}-con{context}-reglasso-alphas_{min_alpha}_{max_alpha}_{num_alphas}-all_data/{full_elec_name}_{mode}{{ending}}"
+    corr_path_template = f"{model_path}/tk-200ms-{sid}-lay{layer}-con{context}-corr_coeffs"
 
     # Prep encodings paths
     kfolds_enc_path = kfolds_path_template.format(ending=".csv")
@@ -260,9 +261,13 @@ def get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context, min
     # Prep coeffs paths
     kfolds_coeffs_path = kfolds_path_template.format(ending="_coeffs.npy")
     all_data_coeffs_path = all_data_path_template.format(ending="_coeffs.npy")
+    pvals_names_path = f"{corr_path_template}/pvals_combined_names{f'({filter_type})' if filter_type else ''}.pkl"
+    pvals_combined_corrected_path = f"{corr_path_template}/pvals_combined_corrected{f'({filter_type})' if filter_type else ''}.npy"
 
     return (kfolds_enc_path, kfolds_coeffs_path,
-            all_data_enc_path, all_data_coeffs_path)
+            all_data_enc_path, all_data_coeffs_path,
+            pvals_names_path, pvals_combined_corrected_path,
+            )
 
 def get_elec_locations(subjects_type):
     """
@@ -329,7 +334,8 @@ def get_non_zero_coeffs_old(sid, elecs_names, model_name, layer, context, min_al
     reliable_chosen_coeffs_dict = {}
     for full_elec_name in elecs_names:
         (kfolds_enc_path, kfold_coeffs_path,
-         all_data_enc_path, all_data_coeffs_path) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
+         all_data_enc_path, all_data_coeffs_path,
+         pvals_names_path, pvals_combined_corrected_path) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
                                                                                             min_alpha, max_alpha, num_alphas, full_elec_name, mode)
 
         # Encoding
@@ -372,8 +378,9 @@ def get_non_zero_coeffs_old(sid, elecs_names, model_name, layer, context, min_al
 
     return all_data_chosen_coeffs_dict, reliable_chosen_coeffs_dict
 
-def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha, max_alpha, num_alphas, mode,
-                        kfolds_threshold=10, return_all_data_coeffs=True, return_kfolds_coeffs=True, return_all_data_encoding=True, return_kfolds_encoding=True):
+def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha, max_alpha, num_alphas, mode, kfolds_threshold=10,
+                        return_all_data_coeffs=True, return_kfolds_coeffs=True, return_corr_coeffs=True,
+                        return_all_data_encoding=True, return_kfolds_encoding=True, ):
     """
     Returns two dfs - one for all_data and one for kfolds reliable (same coeff appears in over kfolds_threshold of the folds).
     The dicts map each output_elec_name_prefix + elec_name to a tuple of (num_of_coeffs, actual_coeffs, encoding).
@@ -388,8 +395,20 @@ def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha,
     :param kfolds_threshold: how many folds does a coeff need to appear in, in order to be reliable
     :param output_elec_name_prefix: what to add to the electrodes names
     """
+    assert return_kfolds_encoding or return_all_data_encoding or return_all_data_coeffs or return_kfolds_coeffs or return_corr_coeffs
     elec_df = load_electrode_names_and_locations(sid, filter_type)
     elecs_names = elec_df["full_elec_name"].to_list()
+
+    if return_corr_coeffs:
+        return_kfolds_encoding = True
+        # Load only once:
+        (_, _, _, _, pvals_names_path, pvals_combined_corrected_path) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
+                                                                                                                min_alpha, max_alpha, num_alphas,
+                                                                                                                None, mode, filter_type)
+        pvals_combined_corrected = np.load(pvals_combined_corrected_path)
+        with open(pvals_names_path, 'rb') as f:
+            pvals_names = pickle.load(f)
+
 
     coeffs_indx = None
     time_index = range(161)
@@ -397,11 +416,13 @@ def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha,
 
     all_data_dfs = []
     kfolds_dfs = []
+    corr_dfs = []
 
     for full_elec_name in elecs_names:
         (kfolds_enc_path, kfold_coeffs_path,
-         all_data_enc_path, all_data_coeffs_path) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
-                                                                                            min_alpha, max_alpha, num_alphas, full_elec_name, mode)
+         all_data_enc_path, all_data_coeffs_path,
+         _, _) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
+                                                         min_alpha, max_alpha, num_alphas, full_elec_name, mode, filter_type)
 
         # Encoding
         all_data_encoding = None
@@ -416,8 +437,12 @@ def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha,
 
         # Prep
         if coeffs_indx is None:
-            all_data_coeffs = np.load(all_data_coeffs_path)  # shape (embedding_size, timepoints)
-            embedding_size = all_data_coeffs.shape[0]
+            if return_all_data_coeffs:
+                all_data_coeffs = np.load(all_data_coeffs_path)  # shape (embedding_size, timepoints)
+                embedding_size = all_data_coeffs.shape[0]
+            else:
+                kfolds_coeffs = np.load(kfold_coeffs_path)
+                embedding_size = kfolds_coeffs.shape[1]
             coeffs_indx = np.arange(embedding_size).astype(str)  # Needed for indexing later
 
         # Coeffs - All data
@@ -444,6 +469,14 @@ def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha,
             reliable_coeffs_counts = (kfold_coeffs_in_folds >= kfolds_threshold).sum(axis=0)  # For each timepoint, how many coeffs are non-zero in at least `threshold` kfolds
             assert np.array_equal([len(coeffs) for coeffs in reliable_chosen_coeffs], reliable_coeffs_counts) # Making sure the amounts make sense
 
+        # Coeffs - corr
+        corr_chosen_coeffs = None
+        corr_coeffs_counts = None
+        if return_corr_coeffs:
+            elec_pvals_corrected = pvals_combined_corrected[:, :, pvals_names.index(full_elec_name)]
+            corr_chosen_coeffs = [coeffs_indx[col] for col in (elec_pvals_corrected <= 0.05).T]
+
+            corr_coeffs_counts = np.sum(elec_pvals_corrected <= 0.05, axis=0)  # Absolute counts
 
         # Save it all
         current_all_data_df = pd.DataFrame(data={"full_elec_name": full_elec_name,
@@ -458,16 +491,25 @@ def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha,
                                                "num_of_coeffs": reliable_coeffs_counts,
                                                "actual_coeffs": reliable_chosen_coeffs,
                                                "encoding": kfolds_encoding})
+        current_corr_df = pd.DataFrame(data={"full_elec_name": full_elec_name,
+                                               "time_index": time_index,
+                                               "time": time_points.round(2),
+                                               "num_of_coeffs": corr_coeffs_counts,
+                                               "actual_coeffs": corr_chosen_coeffs,
+                                               "encoding": kfolds_encoding})
 
         all_data_dfs.append(current_all_data_df)
         kfolds_dfs.append(current_kfolds_df)
+        corr_dfs.append(current_corr_df)
 
     all_data_df = pd.concat(all_data_dfs, ignore_index=True)
     all_data_df = all_data_df.merge(elec_df, on="full_elec_name", how="left")
     kfolds_df = pd.concat(kfolds_dfs, ignore_index=True)
     kfolds_df = kfolds_df.merge(elec_df, on="full_elec_name", how="left")
+    corr_df = pd.concat(corr_dfs, ignore_index=True)
+    corr_df = corr_df.merge(elec_df, on="full_elec_name", how="left")
 
-    return all_data_df, kfolds_df
+    return all_data_df, kfolds_df, corr_df
 
 def get_coeffs(sid, filter_type, model_name, layer, context, min_alpha, max_alpha, num_alphas, mode,
                return_all_data_coeffs=True, return_kfolds_coeffs=True, return_all_data_encoding=True, return_kfolds_encoding=True):
@@ -497,8 +539,9 @@ def get_coeffs(sid, filter_type, model_name, layer, context, min_alpha, max_alph
 
     for full_elec_name in elecs_names:
         (kfolds_enc_path, kfold_coeffs_path,
-         all_data_enc_path, all_data_coeffs_path) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
-                                                                                            min_alpha, max_alpha, num_alphas, full_elec_name, mode)
+         all_data_enc_path, all_data_coeffs_path,
+         pvals_names_path, pvals_combined_corrected_path) = get_electrode_encoding_and_coeffs_paths(sid, model_name, layer, context,
+                                                                                            min_alpha, max_alpha, num_alphas, full_elec_name, mode, filter_type)
 
         # Encoding
         all_data_encoding = None
@@ -566,6 +609,7 @@ def _process_coeff_df(kfolds_df: DataFrame):
     # labels = ['x<-0.6', '-0.6≤x<-0.3', '-0.3≤x<0', '0≤x<0.3', '0.3≤x<0.6', '0.6≤x']
     bins = [-np.inf, -0.8, -0.4, 0, 0.4, 0.8, np.inf]
     labels = ['x<-0.8', '-0.8≤x<-0.4', '-0.4≤x<0', '0≤x<0.4', '0.4≤x<0.8', '0.8≤x']
-    kfolds_df['time_bin'] = pd.cut(kfolds_df['time'], bins=bins, labels=labels, right=False)
+    kfolds_df['time_bin'] = pd.cut(kfolds_df['time'], bins=bins, labels=labels, right=False).astype(str)
+    kfolds_df["time_bin_and_princeton_class"] = kfolds_df['princeton_class'] + "_" + kfolds_df['time_bin']
 
     return kfolds_df
