@@ -213,7 +213,7 @@ def overlap_by_area(sid, filter_type, model_info, min_alpha, max_alpha, num_alph
     print("Done!")
 
 
-def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, x="rounded_encoding",  y="num_of_coeffs", hue=None, kfolds_threshold=10, query="",
+def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, x="rounded_encoding", hue=None, kfolds_threshold=10, query="",
                             violin_annot=True):
     """
     All electrodes, all times
@@ -229,7 +229,7 @@ def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, 
     :return:
     """
     kfolds_df = prepare_non_zero_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query)
-    _plot_x_vs_num_coeffs(kfolds_df, max_alpha, min_alpha, model_info, num_alphas, x=x, hue=hue, filter_name=query,  y=y,
+    _plot_x_vs_num_coeffs(kfolds_df, max_alpha, min_alpha, model_info, num_alphas, x=x, hue=hue, filter_name=query,
                           kfolds_threshold=kfolds_threshold, violin_annot=violin_annot)
     # from scipy import stats
     # # Calculate correlation
@@ -275,6 +275,10 @@ def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, 
     # )
     #
     # fig.show()
+    kfolds_df[x] = pd.Categorical(
+        kfolds_df[x],
+        categories=kfolds_df[x].unique()
+    )
 
     nb_model = smf.negativebinomial(f'num_of_coeffs ~ C({x}) + encoding', data=kfolds_df).fit()
     print(nb_model.summary())
@@ -283,6 +287,15 @@ def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, 
 
 
 def prepare_non_zero_df(filter_type, kfolds_threshold: int, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query="", df_type="kfolds"):
+    """
+    Returns a df of type df_type, after conducting the query.
+    The df has a row for each electrode*time lag. Each row has the number of non_zero/sig coeffs (num_of_coeffs), the list of them (actual_coeffs), the encoding value (encoding), and brain area info (princeton_class etc.).
+    It also has some useful columns such as time_bin, rounded_encoding, and time_bin*brain area.
+
+    In the all_data_df the coeffs are all the non-zero coeffs, and the encoding is on the train.
+    In the kfolds_df the coeffs are those that appears in over kfolds_threshold of the folds, and the encoding is the usual one.
+    In the corr_df the coeffs are those that have a significant correlation with the signal, and the encdoing is taken from the kfolds.
+    """
     return_all_data_coeffs, return_kfolds_coeffs, return_corr_coeffs, return_all_data_encoding, return_kfolds_encoding = False,False,False,False,False
 
     if df_type == "all_data":
@@ -293,6 +306,8 @@ def prepare_non_zero_df(filter_type, kfolds_threshold: int, max_alpha, min_alpha
         return_kfolds_encoding=True
     elif df_type == "corr":
         return_corr_coeffs = True
+    else:
+        raise ValueError("df_type must be 'all_data', 'kfolds', 'corr', or 'all_data'")
 
     all_data_df, kfolds_df, corr_df = get_non_zero_coeffs(sid, filter_type, model_info["model_full_name"], model_info["layer"], model_info["context"],
                                                 min_alpha, max_alpha, num_alphas, mode, kfolds_threshold,
@@ -305,8 +320,6 @@ def prepare_non_zero_df(filter_type, kfolds_threshold: int, max_alpha, min_alpha
         df = kfolds_df
     elif df_type == "corr":
         df = corr_df
-    else:
-        raise ValueError("df_type must be 'all_data', 'kfolds', 'corr', or 'all_data'")
 
     df = _process_coeff_df(df)
 
@@ -315,7 +328,7 @@ def prepare_non_zero_df(filter_type, kfolds_threshold: int, max_alpha, min_alpha
 
     return df
 
-def _plot_x_vs_num_coeffs(df: DataFrame, max_alpha, min_alpha, model_info, num_alphas, x="rounded_encoding", y="num_of_coeffs", hue=None, filter_name=None, kfolds_threshold=8, violin_annot=True):
+def _plot_x_vs_num_coeffs(df: DataFrame, max_alpha, min_alpha, model_info, num_alphas, x="rounded_encoding", hue=None, filter_name=None, kfolds_threshold=8, violin_annot=True):
     if df[x].unique().size > 20: # Long x axis
         fig = plt.figure(figsize=(15, 15))
     else:
@@ -345,7 +358,8 @@ def _plot_x_vs_num_coeffs(df: DataFrame, max_alpha, min_alpha, model_info, num_a
                         time_bin_and_princeton_class1 = f"{area1}_{time}"
                         time_bin_and_princeton_class2 = f"{area2}_{time}"
                         if time_bin_and_princeton_class1 in all_time_bin_and_princeton_class and time_bin_and_princeton_class2 in all_time_bin_and_princeton_class:
-                            pair = ((category, time_bin_and_princeton_class1), (category, time_bin_and_princeton_class2))
+                            pair = ((category, time_bin_and_princeton_class1),
+                                    (category, time_bin_and_princeton_class2))
                             pairs.append(pair)
 
                 # Connect consecutive times with same class
@@ -356,7 +370,8 @@ def _plot_x_vs_num_coeffs(df: DataFrame, max_alpha, min_alpha, model_info, num_a
                         time_bin_and_princeton_class1 = f"{area}_{time1}"
                         time_bin_and_princeton_class2 = f"{area}_{time2}"
                         if time_bin_and_princeton_class1 in all_time_bin_and_princeton_class and time_bin_and_princeton_class2 in all_time_bin_and_princeton_class:
-                            pair = ((category, time_bin_and_princeton_class1), (category, time_bin_and_princeton_class2))
+                            pair = ((category, time_bin_and_princeton_class1),
+                                    (category, time_bin_and_princeton_class2))
                             pairs.append(pair)
         # if hue == "princeton_class":
         #     pairs.extend([((item1, pair[0]), (item1, pair[1]))
@@ -479,7 +494,7 @@ def customize_time_xaxis(ax, x, n=20):
     ax.axvline(x=tick_positions[80], color='black', linewidth=0.5, alpha=0.7)
 
 def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
-                col_to_compare, group1, group2, kfolds_threshold=10, query=""):
+                col_to_compare, group1, group2, kfolds_threshold=10, query="", df_type="kfolds&corr"):
     """
     Finds which coeffs appear in which
     :param sid:
@@ -495,20 +510,20 @@ def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, 
     """
     first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
         col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-        num_alphas, query, sid)
-    set_colors = (COLOR_PALETTE[first_group_name], COLOR_PALETTE[second_group_name])
+        num_alphas, query, sid, df_type=df_type)
 
+    set_colors = (COLOR_PALETTE[first_group_name], COLOR_PALETTE[second_group_name])
     venn2((first_group_all_coeffs, second_group_all_coeffs), (first_group_name, second_group_name), set_colors=set_colors)
-    plt.title("Coefficients for each group"
+    plt.title(f"Coefficients for each group, type of coeffs - {df_type}"
               + (f"\nModel: {model_info['model_short_name']} (α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
               + (f"\nfilter={query}" if query else ""))
     plt.show()
 
     # venn3((first_group_sig_coeffs, second_group_sig_coeffs, all_coeffs), (first_group_name, second_group_name, "all_coeffs"))
-    plt.title("Distinct Statistically Significant Coefficients for each group"
-              + (f"\nModel: {model_info['model_short_name']} (α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
-              + (f"\nfilter={query}" if query else ""))
-    plt.show()
+    # plt.title("Distinct Statistically Significant Coefficients for each group"
+    #           + (f"\nModel: {model_info['model_short_name']} (α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
+    #           + (f"\nfilter={query}" if query else ""))
+    # plt.show()
 
     print("done!")
 
@@ -560,14 +575,24 @@ def amount_distinct_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, n
 
 
 def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold: int, max_alpha,
-                                min_alpha, mode, model_info, num_alphas, query: str, sid) -> tuple[set[Any], str, set[Any], str]:
+                                min_alpha, mode, model_info, num_alphas, query: str, sid, df_type="kfolds&corr") -> tuple[set[Any], str, set[Any], str]:
     if query:
         query = "(" + query + f") & (({col_to_compare} == '{group1}') | ({col_to_compare} == '{group2}'))"
     else:
         query = f"(({col_to_compare} == '{group1}') | ({col_to_compare} == '{group2}'))"
-    kfolds_df = prepare_non_zero_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-                                    num_alphas, sid, query=query)
-    exploded_df = kfolds_df.query("num_of_coeffs > 0").explode("actual_coeffs")
+    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
+        non_zero_kfolds_df = prepare_non_zero_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
+                                          num_alphas, sid, query=query, df_type="kfolds")
+        exploded_kfolds_df = non_zero_kfolds_df.query("num_of_coeffs > 0").explode("actual_coeffs")
+        non_zero_corr_df = prepare_non_zero_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
+                                          num_alphas, sid, query=query, df_type="corr")
+        exploded_corr_df = non_zero_corr_df.query("num_of_coeffs > 0").explode("actual_coeffs")[["full_elec_name", "time_index", "actual_coeffs"]]
+
+        exploded_df = exploded_kfolds_df.merge(exploded_corr_df, how="inner", on=["full_elec_name", "time_index", "actual_coeffs"])
+    else:
+        non_zero_df = prepare_non_zero_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
+                                        num_alphas, sid, query=query, df_type=df_type)
+        exploded_df = non_zero_df.query("num_of_coeffs > 0").explode("actual_coeffs")
     first_group_name, second_group_name = sorted([group1, group2])
 
     first_group_all_coeffs = set(
@@ -579,7 +604,7 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
 
 def prepare_kfolds_coeffs_df(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, query="") -> DataFrame:
     _, kfolds_df = get_coeffs(sid, filter_type, model_info["model_full_name"], model_info["layer"], model_info["context"], min_alpha, max_alpha, num_alphas, mode,
-                                        return_all_data_coeffs=False, return_all_data_encoding=False)
+                              return_all_data_coeffs=False, return_all_data_encoding=False)
 
     kfolds_df = _process_coeff_df(kfolds_df)
 

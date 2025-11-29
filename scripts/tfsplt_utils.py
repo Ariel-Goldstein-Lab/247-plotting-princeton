@@ -382,11 +382,12 @@ def get_non_zero_coeffs(sid, filter_type, model_name, layer, context, min_alpha,
                         return_all_data_coeffs=True, return_kfolds_coeffs=True, return_corr_coeffs=True,
                         return_all_data_encoding=True, return_kfolds_encoding=True, ):
     """
-    Returns two dfs - one for all_data and one for kfolds reliable (same coeff appears in over kfolds_threshold of the folds).
-    The dicts map each output_elec_name_prefix + elec_name to a tuple of (num_of_coeffs, actual_coeffs, encoding).
-        num_of_coeffs is a np array in shape (timepoints)
-        actual_coeffs is a list of len (timepoints), each entry i is a np array of shape (num_of_coeffs[i])
-        encoding is filled only if return_encoding=True, and is in shape (timepoints) or (folds, timepoints) for all_data and kfolds respectively.
+    Returns three dfs - all_data_df, kfolds_df and corr_df.
+    These dfs have a row for each electrode*time lag. Each row has the number of non_zero/sig coeffs (num_of_coeffs), the list of them (actual_coeffs), the encoding value (encoding), and brain area info (princeton_class etc.).
+    In the all_data_df the coeffs are all the non-zero coeffs, and the encoding is on the train.
+    In the kfolds_df the coeffs are those that appears in over kfolds_threshold of the folds, and the encoding is the usual one.
+    In the corr_df the coeffs are those that have a significant correlation with the signal, and the encdoing is taken from the kfolds.
+
 
     :param model_name: full model name (e.g., "gemma-scope-2b-pt-res-canonical")
     :param mode: "comp" or "prod"
@@ -600,7 +601,7 @@ def get_coeffs(sid, filter_type, model_name, layer, context, min_alpha, max_alph
 
 def _process_coeff_df(kfolds_df: DataFrame):
     """
-    Adds to a df useful columns such as time_bin and rounded_encoding.
+    Adds to a df useful columns such as time_bin, rounded_encoding, and time_bin*brain area.
     """
     kfolds_df['rounded_encoding'] = kfolds_df['encoding'].round(1)
     kfolds_df.loc[kfolds_df['rounded_encoding'] == -0.0, 'rounded_encoding'] = 0.0

@@ -765,7 +765,6 @@ def plot_single_elec_single_model_dual_axis(row_idx, elec_name, model_name, mode
     corr, p_value = calc_encoding_coeffs_corr(encoding_results, coeff_nums, computed_corr_config)
 
     # add_loc_to_plot(row_idx, fig, elec_name)
-    return encoding_results, coeff_nums, plots_data
     return encoding_results, coeff_nums, corr, p_value, plots_data
 
 
@@ -1223,7 +1222,7 @@ def plot_coeffs_dual_axis(row_idx, model_name, models_info, line_type, plots_dat
 
 
 def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig):
-    for row_idx in range(2, amount_of_electrodes+1):
+    for row_idx in range(2, amount_of_electrodes + 1):
         # row_idx = idx + 1
 
         # Add horizontal line at y=0 for encoding (primary y-axis)
