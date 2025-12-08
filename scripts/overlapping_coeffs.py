@@ -10,6 +10,7 @@ from plotly.subplots import make_subplots
 import matplotlib.gridspec as gridspec
 import seaborn as sns
 from scipy import stats
+import matplotlib.colors as mc
 from scipy.stats import fisher_exact, chi2_contingency
 import requests
 from typing import Optional, Dict, Any
@@ -23,12 +24,14 @@ import plotly.express as px
 from itertools import combinations
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
+from scipy.stats import pearsonr
 
-from tfsplt_utils import load_electrode_names_and_locations, get_non_zero_coeffs_old, get_coeffs_dfs, get_coeffs, _process_coeff_df, prepare_coeffs_df
+from tfsplt_utils import load_electrode_names_and_locations, get_non_zero_coeffs_old, get_coeffs_df, get_coeffs_dfs, get_coeffs, _process_coeff_df, prepare_coeffs_df, _get_exploded_united_kfolds_and_corr
 
 
 AREA_QUERY = "(brain_area == 'STG') | (brain_area == 'IFG')"
 TIME_QUERY = "(time_bin == '-0.4≤x<0') | (time_bin == '0≤x<0.4')"
+AREA_AND_TIME_QUERY = f"({AREA_QUERY})&({TIME_QUERY})"
 
 ROUNDED_ENCODING = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
 ORDERED_PRINCETON_CLASS = ['aMTG', 'MFG', 'pmtg', 'other', 'premotor', 'TP', 'AG', 'IFG', 'parietal', 'precentral', 'postcg', 'STG'] # Sorted by mean num_of_chosen_coeffs
@@ -47,10 +50,12 @@ ORDERS = {"rounded_encoding": ROUNDED_ENCODING,
 # 'x<-0.8':'#0077b6', '-0.8≤x<-0.4':'#0096c7', '-0.4≤x<0':'#00b4d8', '0≤x<0.4':'#ff9e00', '0.4≤x<0.8':'#ff9100', '0.8≤x':'#ff8500'
 COLOR_PALETTE = {"IFG": '#ff4da0', "STG": '#00c16a', #IFG-pink, STG-green
                  # 'x<-0.8':'#ff8500', '-0.8≤x<-0.4':'#ff9100', '-0.4≤x<0':'#ff9e00', '0≤x<0.4':'#00b4d8', '0.4≤x<0.8':'#0096c7', '0.8≤x':'#0077b6',
-                 #'-0.4≤x<0':'#ff9d00', '0≤x<0.4':'#ff6e01', #Dark then light
-                 '-0.4≤x<0':'#D1D1D1', '0≤x<0.4':'#A6A6A6', #Dark then light
+                 '-0.4≤x<0':'#ff9d00', '0≤x<0.4':'#ff6e01', #Dark then light orange
+                 # '-0.4≤x<0':'#ff9d00', '0≤x<0.4':'#64B5F6', #Dark then light
+                 # '-0.4≤x<0':'#D1D1D1', '0≤x<0.4':'#A6A6A6', #Dark then light grey
                  'IFG_-0.4≤x<0':"#ff7fbc", 'IFG_0≤x<0.4':"#f72585", 'STG_-0.4≤x<0':"#26cc80", 'STG_0≤x<0.4':"#008e4d",
-                 0: "#ff8500", 0.1: "#ff9100", 0.2: "#ff9e00", 0.3: "#00b4d8", 0.4: "#0096c7", 0.5: "#0077b6",}
+                 0: "#ff8500", 0.1: "#ff9100", 0.2: "#ff9e00", 0.3: "#00b4d8", 0.4: "#0096c7", 0.5: "#0077b6",
+                 '0': "#ff8500", '0.1': "#ff9100", '0.2': "#ff9e00", '0.3': "#00b4d8", '0.4': "#0096c7", '0.5': "#0077b6",}
                # 'precentral': "#C6E7FF", 'premotor': "#C6E7FF", 'MFG': "#C6E7FF", 'postcg': "#C6E7FF", 'aMTG': "#C6E7FF", 'TP': "#C6E7FF", 'AG': "#C6E7FF", 'parietal': "#C6E7FF", 'pmtg': "#C6E7FF", 'other': "#C6E7FF"}
                 # B4F8C8, #FBE7C6
 
@@ -216,7 +221,7 @@ def overlap_by_area(sid, filter_type, model_info, min_alpha, max_alpha, num_alph
 
 
 def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, x="rounded_encoding", hue=None, kfolds_threshold=10, query="",
-                            violin_annot=True, df_type="kfolds", sig_test="t-test"):
+                            violin_annot=True, df_type="kfolds&corr", sig_test="t-test"):
     """
     All electrodes, all times
     :param sid:
@@ -230,7 +235,13 @@ def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, 
     :param kfolds_threshold:
     :return:
     """
-    kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query="")
+    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
+        _, kfolds_df = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
+                                             num_alphas, mode, kfolds_threshold, query)
+    else:
+        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+
     _plot_x_vs_num_coeffs(kfolds_df, max_alpha, min_alpha, model_info, num_alphas, x=x, hue=hue, filter_name=query,
                           kfolds_threshold=kfolds_threshold, sig_test=sig_test) #, violin_annot=violin_annot
     # from scipy import stats
@@ -510,7 +521,7 @@ def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, 
     # # Intersectin kfolds and corr
     # assert (first_group_name_kfolds == first_group_name_corr) and (second_group_name_kfolds == second_group_name_corr)
 
-    _, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
+    exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
         col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
         num_alphas, query, sid, coeff_type=df_type)
 
@@ -575,22 +586,13 @@ def amount_distinct_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, n
     plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout leaving space for suptitle
     plt.show()
 
-
 def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold: int, max_alpha,
                                 min_alpha, mode, model_info, num_alphas, query: str, sid, coeff_type="kfolds&corr"):
     query = get_group_query(col_to_compare, group1, group2, query)
 
     if coeff_type == "kfolds&corr" or coeff_type == "corr&kfolds":
-        non_zero_kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-                                               num_alphas, sid, query=query, df_type="kfolds")
-        exploded_kfolds_df = non_zero_kfolds_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
-        non_zero_corr_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-                                             num_alphas, sid, query=query, df_type="corr")
-        exploded_corr_df = non_zero_corr_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])[
-            ["full_elec_name", "time_index", "actual_chosen_coeffs", "chosen_coeffs_val"]]
-
-        exploded_df = exploded_kfolds_df.merge(exploded_corr_df, how="inner", suffixes=("_kfolds", "_corr"),
-                                               on=["full_elec_name", "time_index", "actual_chosen_coeffs"])
+        exploded_df, _ = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
+                                                           kfolds_threshold, query)
     else:
         non_zero_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
                                         num_alphas, sid, query=query, df_type=coeff_type)
@@ -616,7 +618,6 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
 
     return exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name
 
-
 def get_group_query(col_to_compare, group1, group2, query: str) -> str:
     if query:
         query = "(" + query + f") & (({col_to_compare} == '{group1}') | ({col_to_compare} == '{group2}'))"
@@ -636,7 +637,7 @@ def prepare_kfolds_coeffs_df(sid, filter_type, model_info, min_alpha, max_alpha,
 
     return kfolds_df
 
-def run_all_boxplots(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, kfolds_threshold, df_type="kfolds", sig_test="t-test"):
+def run_all_boxplots(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, kfolds_threshold, df_type="kfolds&corr", sig_test="t-test"):
 
     # x,hue,query:
     all_options = [
@@ -719,105 +720,10 @@ def coeffs_values(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas
             top_coeffs[group][col] = group_data.nlargest(top, col)['actual_chosen_coeffs'].astype(int).tolist()
             print(f"\t{col}: {top_coeffs[group][col]}")
 
-    # Top by count:
-    stats = exploded_df.groupby(["group", 'actual_chosen_coeffs']).agg(
-        count=('actual_chosen_coeffs', 'count'),
-        # mean_value=('chosen_coeffs_val_kfolds', 'mean'),
-        # std_value=('chosen_coeffs_val_kfolds', 'std'),
-    ).reset_index()
-    # stats['abs_mean_value'] = stats['mean_value'].abs().astype(float)
-
-    top_per_group_by_count = stats.groupby('group').apply(lambda x: x.nlargest(top, 'count')).reset_index(drop=True)
-    top_per_group_by_count["top_by"] = "count"
-    # top_per_group_by_mean = stats.groupby('group').apply(lambda x: x.nlargest(top, 'abs_mean_value')).reset_index(drop=True)
-    # top_per_group_by_mean["top_by"] = f"mean_{value_type}"
-
-    print(top_per_group_by_count)
-    for group in top_per_group_by_count["group"].unique():
-        print(f"group: {group}",
-              set(top_per_group_by_count.query(f"group == '{group}'")["actual_chosen_coeffs"].astype(int).to_list()))
-    top_coeffs_dfs.append(top_per_group_by_count)
-    # print(top_per_group_by_mean)
-    # for group in top_per_group_by_count["group"].unique():
-    #     print(f"group: {group}",
-    #           set(top_per_group_by_mean.query(f"group == '{group}'")["actual_chosen_coeffs"].astype(int).to_list()))
-
-    del stats
-    gc.collect()
-
-    # Top by value
-    def get_top_by_value(exploded_df, df, value_type, top):
-        print(f"starting {value_type} top {top}")
-        df = df[["full_elec_name", "time_index", "all_coeffs_index", "all_coeffs_val"]].explode(["all_coeffs_index", "all_coeffs_val"])
-        df["all_coeffs_index"] = df["all_coeffs_index"].astype(str)
-        # if value_type == "corr":
-        merged_df = exploded_df.merge(df, how="left",
-                                             left_on=["full_elec_name", "time_index", "actual_chosen_coeffs"],
-                                             right_on=["full_elec_name", "time_index", "all_coeffs_index"])
-        del df
-        stats = merged_df.groupby(["group", 'actual_chosen_coeffs']).agg(
-            mean_value=('all_coeffs_val', 'mean'),
-            std_value=('all_coeffs_val', 'std'),
-        ).reset_index()
-        stats['abs_mean_value'] = stats['mean_value'].abs().astype(float)
-        
-        # Free memory
-        del merged_df
-        gc.collect()  # Force garbage collection
-
-        top_per_group_by_mean = stats.groupby('group').apply(lambda x: x.nlargest(top, 'abs_mean_value')).reset_index(drop=True)
-        top_per_group_by_mean["top_by"] = f"mean_{value_type}"
-        print(top_per_group_by_mean)
-        for group in top_per_group_by_count["group"].unique():
-            print(f"group: {group}",
-                  set(top_per_group_by_mean.query(f"group == '{group}'")["actual_chosen_coeffs"].astype(int).to_list()))
-
-        return top_per_group_by_mean
-
-    query = get_group_query(col_to_compare, group1, group2, query)  # Take only rows that are needed
-
-    if "kfolds" in df_type:
-        print("- starting kfolds top 5")
-        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas,
-                                    sid, query, df_type="kfolds")
-        # _, kfolds_df, _ = get_coeffs_dfs(sid, filter_type, model_info["model_full_name"], model_info["layer"], model_info["context"],
-        #                                  min_alpha, max_alpha, num_alphas, mode, kfolds_threshold,
-        #                                  return_all_data=False, return_kfolds=True, return_corr=False)
-        top_per_group_by_mean_kfolds = get_top_by_value(exploded_df, kfolds_df, "kfolds", top)
-        top_coeffs_dfs.append(top_per_group_by_mean_kfolds)
-        del kfolds_df  # Free memory immediately
-        gc.collect()  # Force garbage collection
-        print("- finished kfolds top 5")
-
-    if "corr" in df_type:
-        print("- starting corr top 5")
-        corr_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query, df_type = "corr")
-        # _, _, corr_df = get_coeffs_dfs(sid, filter_type, model_info["model_full_name"], model_info["layer"], model_info["context"],
-        #                                                  min_alpha, max_alpha, num_alphas, mode, kfolds_threshold,
-        #                                                  return_all_data=False, return_kfolds=False, return_corr=True)
-        top_per_group_by_mean_corr = get_top_by_value(exploded_df, corr_df, "corr", top)
-        top_coeffs_dfs.append(top_per_group_by_mean_corr)
-        del corr_df  # Free memory immediately
-        gc.collect()  # Force garbage collection
-        print("- finished corr top 5")
-
-    if "all_data" in df_type:
-        print("- starting all_data top 5")
-        all_data_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-                                        num_alphas, sid, query, df_type="all_data")
-        # all_data_df, _, _ = get_coeffs_dfs(sid, filter_type, model_info["model_full_name"], model_info["layer"], model_info["context"],
-        #                                    min_alpha, max_alpha, num_alphas, mode, kfolds_threshold,
-        #                                    return_all_data=True, return_kfolds=False, return_corr=False)
-        top_per_group_by_mean_all_data = get_top_by_value(exploded_df, all_data_df, "all_data", top)
-        top_coeffs_dfs.append(top_per_group_by_mean_all_data)
-        del all_data_df  # Free memory immediately
-        gc.collect()  # Force garbage collection
-        print("- finished all_data top 5")
-
-    top_coeffs_df = pd.concat(top_coeffs_dfs, ignore_index=True)
+    top_coeffs_df = pd.DataFrame(top_coeffs)
     top_coeffs_df.to_pickle(f'/scratch/gpfs/HASSON/tk6637/princeton/247-encoding/results/podcast/'
                             f'tk-podcast-{sid}-{model_info["model_full_name"]}-lag2k-25-all/'
-                            f'tk-200ms-777-lay{model_info["layer"]}-con{model_info["context"]}-alphas_{min_alpha}_{max_alpha}_{num_alphas}-group1_{group1}-group2_{group2}-top_{top}-df_type{df_type}-kfolds_threshold_{kfolds_threshold}-your_file_name.pkl')
+                            f'tk-200ms-777-lay{model_info["layer"]}-con{model_info["context"]}-alphas_{min_alpha}_{max_alpha}_{num_alphas}-group1_{group1}-group2_{group2}-top_{top}-df_type_{df_type}-kfolds_threshold_{kfolds_threshold}-to_interp.pkl')
 
     print(top_coeffs_df)
     return top_coeffs_df
@@ -968,6 +874,218 @@ def coeffs_values(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas
 #     fig.show()
 #     a=0
 
+def plot_encoding_num_coeffs_scatterplot_all_data(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
+                                                  x="rounded_encoding", kfolds_threshold=10, query="", df_type="kfolds&corr"):
+
+    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
+        _, kfolds_df = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
+                                             num_alphas, mode, kfolds_threshold, query)
+    else:
+        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+
+    # Create the scatter plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Get unique categories from column x
+    categories = kfolds_df[x].unique()
+
+    # Starting y position for annotations
+    annotation_y = 0.97
+    category_data = kfolds_df
+    color = '#A865C9'
+    ax.scatter(
+        category_data['encoding'],
+        category_data['num_of_chosen_coeffs'],
+        c=color,
+        alpha=0.7,
+        s=5
+    )
+    corr, p_value = pearsonr(category_data['encoding'], category_data['num_of_chosen_coeffs'])
+    x_vals = np.array([category_data['encoding'].min(), category_data['encoding'].max()])
+    z = np.polyfit(category_data['encoding'], category_data['num_of_chosen_coeffs'], 1)
+    p = np.poly1d(z)
+    ax.plot(x_vals, p(x_vals), color='black', linestyle='--', linewidth=2, alpha=0.8)
+
+    # Add annotation for this category
+    annotation_text = f"r={corr:.3f}, p={p_value:.4f}"
+    ax.text(
+        0.03, annotation_y,
+        annotation_text,
+        transform=ax.transAxes,
+        fontsize=20,
+        verticalalignment='top',
+        bbox=dict(boxstyle='round', facecolor='white', alpha=0.6, edgecolor=color, linewidth=1.5),
+        color=color
+    )
+
+    ax.set_xlabel('Encoding', fontsize=12)
+    ax.set_ylabel('Number of Chosen Coefficients', fontsize=12)
+    ax.set_title(f'Scatter Plot by {x}', fontsize=14)
+    ax.legend(title=x, bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    # Remove the top and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
+def darken_color(color, factor=0.7):
+    # Convert string/hex to RGB, multiply by factor (0.7 = 30% darker), and ensure valid range
+    rgb = mc.to_rgb(color)
+    return tuple([max(0, min(1, val * factor)) for val in rgb])
+
+def plot_encoding_num_coeffs_scatterplot(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, category_by="brain_area", kfolds_threshold=10, query="",
+                                         df_type="kfolds&corr"):
+    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
+        _, kfolds_df = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
+                                             num_alphas, mode, kfolds_threshold, query)
+    else:
+        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+
+
+    # Statistical test:
+    # MODEL 1: Interaction (Testing if slopes differ - Your original idea)
+    # The '*' operator automatically includes main effects AND the interaction
+    model_interaction = smf.ols(f"num_of_chosen_coeffs ~ encoding * C({category_by})", data=kfolds_df).fit()
+    print(model_interaction.summary())
+    # Look at the row 'encoding:C(x)'. If P < 0.05, the slopes are significantly different.
+
+    print("--- Model 1: Main Effects (Parallel Slopes) ---")
+    print(f"Formula: num_of_chosen_coeffs ~ C({category_by}) + encoding")
+    # Note: Added maxiter and method to handle convergence warnings common in high-collinearity data
+    model_main = smf.negativebinomial(
+        f"num_of_chosen_coeffs ~ C({category_by}) + encoding",
+        data=kfolds_df
+    ).fit(maxiter=1000)
+
+    print(model_main.summary())
+
+    # ==========================================
+    # 4. STATISTICAL MODELING (Interaction Effects)
+    # ==========================================
+    print("\n--- Model 2: Interaction Effects (Different Slopes) ---")
+    print(f"Formula: num_of_chosen_coeffs ~ C({category_by}) * encoding")
+    print("Testing if the relationship between encoding and count differs by group.")
+
+    model_interaction = smf.negativebinomial(
+        f"num_of_chosen_coeffs ~ C({category_by}) * encoding",
+        data=kfolds_df
+    ).fit(maxiter=1000)
+
+    print(model_interaction.summary())
+
+    # ==========================================
+    # 5. INTERPRETING THE INTERACTION
+    # ==========================================
+    print("\n--- Interaction Interpretation ---")
+    interaction_pvalues = model_interaction.pvalues[model_interaction.pvalues.index.str.contains(':')]
+    significant_interactions = interaction_pvalues[interaction_pvalues < 0.05]
+
+    if len(significant_interactions) > 0:
+        print("SIGNIFICANT INTERACTIONS FOUND:")
+        print(significant_interactions)
+        print("\nConclusion: The slopes ARE significantly different. The effect of encoding depends on the group.")
+        print("You should report the Interaction Model results.")
+    else:
+        print("NO significant interactions found (P > 0.05).")
+        print("Conclusion: The slopes are statistically parallel (differences are likely noise).")
+        print("The difference you saw (0.8 vs 0.755) is not significant. Stick to the Main Effects model.")
+
+    # ==========================================
+    # 6. EFFECT SIZE & DIRECTION (From Main Model)
+    # ==========================================
+    print("\n--- Effect Sizes (Incidence Rate Ratios - Main Model) ---")
+    params = model_main.params
+    conf = model_main.conf_int()
+    conf['IRR'] = params
+    conf.columns = ['Lower CI', 'Upper CI', 'IRR']
+    conf = np.exp(conf)
+
+    print(conf[['IRR', 'Lower CI', 'Upper CI']])
+
+    # ==========================================
+    # 7. PAIRWISE COMPARISONS
+    # ==========================================
+    print("\n--- Pairwise Comparisons (Marginal Means - Main Model) ---")
+    pairwise = model_main.t_test_pairwise(f"C({category_by})")
+    results_df = pairwise.result_frame
+
+    # Check which p-value column exists
+    p_col = 'P>|z|' if 'P>|z|' in results_df.columns else 'P>|t|'
+
+    results_df['Significance'] = results_df[p_col].apply(lambda p: 'Significant' if p < 0.05 else 'Not Sig')
+    results_df['Rate_Ratio_Diff'] = np.exp(results_df['coef'])
+
+    display_cols = ['coef', 'Rate_Ratio_Diff', p_col, 'Significance']
+    print(results_df[display_cols])
+
+
+    # Create the scatter plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Get unique categories from column x
+    categories = kfolds_df[category_by].unique()
+
+    # Starting y position for annotations
+    annotation_y = 0.98
+
+    # Plot each category with its corresponding color
+    for category in categories:
+        if pd.isna(category):
+            mask = kfolds_df[category_by].isna()
+        # Filter data for this category
+        else:
+            mask = kfolds_df[category_by] == category
+        category_data = kfolds_df[mask]
+
+        # Get color from the palette
+        color = COLOR_PALETTE.get(category, 'gray')  # Default to gray if category not in palette
+
+        # Plot scatter for this category
+        ax.scatter(
+            category_data['encoding'],
+            category_data['num_of_chosen_coeffs'],
+            c=color,
+            label=category,
+            alpha=0.5,
+            s=5,
+            zorder=1,
+        )
+
+        # Calculate correlation
+        corr, p_value = pearsonr(category_data['encoding'], category_data['num_of_chosen_coeffs'])
+
+        # Plot correlation line
+        x_vals = np.array([category_data['encoding'].min(), category_data['encoding'].max()])
+        z = np.polyfit(category_data['encoding'], category_data['num_of_chosen_coeffs'], 1)
+        p = np.poly1d(z)
+        ax.plot(x_vals, p(x_vals), color=darken_color(color, factor=0.75), linestyle='--', linewidth=2, alpha=1.0, zorder=2)
+
+        # Add annotation for this category
+        annotation_text = f"{category}: r={corr:.3f}, p={p_value:.4f}"
+        ax.text(
+            0.02, annotation_y,
+            annotation_text,
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.6, edgecolor=color, linewidth=1.5),
+            color=color
+        )
+        annotation_y -= 0.06  # Move down for next annotation
+
+    # Add labels and legend
+    ax.set_xlabel('Encoding', fontsize=12)
+    ax.set_ylabel('Number of Chosen Coefficients', fontsize=12)
+    ax.set_title(f'Scatter Plot by {category_by} for {model_info["model_short_name"]}', fontsize=14)
+    ax.legend(title=category_by, bbox_to_anchor=(1.05, 1), loc='upper left')
+    # ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+    return
+
 def pca_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
                query:str="", plot_3d:bool=False, plot_continues:bool=False, df_type:str="kfolds"):
     """
@@ -1091,26 +1209,29 @@ def pca_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, m
 if __name__ == '__main__':
     models_info = {"gemma2b": {"layer": 13, "context": 32, "embedding_size": 2304,
                              "model_short_name": "gemma2b", "model_full_name": "gemma-2-2b"},
-                   "gemma9b": {"layer": 13, "context": 32, "embedding_size": 3584,
+                   "gemma9b": {"layer": 21, "context": 32, "embedding_size": 3584,
                                "model_short_name": "gemma9b", "model_full_name": "gemma-2-9b"},
                    "gpt2": {"layer": 24, "context": 32, "embedding_size": 1600,
                              "model_short_name": "gpt2", "model_full_name": "gpt2-xl"},
-                   "mistral": {"layer": 16, "context": 32, "embedding_size": 4096,
-                            "model_short_name": "mistral", "model_full_name": "Mistral-7B-v0.3"},
-                   "llama": {"layer": 16, "context": 32, "embedding_size": 4096,
-                             "model_short_name": "llama", "model_full_name": "Meta-Llama-3.1-8B"},
+                   "mistral7b": {"layer": 16, "context": 32, "embedding_size": 4096,
+                            "model_short_name": "mistral7b", "model_full_name": "Mistral-7B-v0.3"},
+                   "llama8B": {"layer": 16, "context": 32, "embedding_size": 4096,
+                             "model_short_name": "llama8B", "model_full_name": "Meta-Llama-3.1-8B"},
                    "glove": {"layer": 0, "context": 1, "embedding_size": 50,
                              "model_short_name": "glove", "model_full_name": "glove50"},
-                   "gemma-scope": {"layer": 13, "context": 32, "embedding_size": 16384,
+                   "gemma-scope2b": {"layer": 13, "context": 32, "embedding_size": 16384,
                                    "model_short_name": "gemma-scope",
                                    "model_full_name": "gemma-scope-2b-pt-res-canonical"},
+                   "gemma-scope9b": {"layer": 21, "context": 32, "embedding_size": 16384,
+                                     "model_short_name": "gemma-scope",
+                                     "model_full_name": "gemma-scope-9b-pt-res-canonical"},
                    }
     time_points = np.linspace(-2, 2, 161)
     time_to_index = {t: i for i, t in enumerate(np.round(time_points, 3))}
 
     sid = 777
     filter_type = '160'
-    model_name = 'gemma-scope'
+    model_name = 'gemma-scope9b'
     min_alpha = -2
     max_alpha = 10
     num_alphas = 100
@@ -1118,14 +1239,16 @@ if __name__ == '__main__':
     kfolds_threshold = 8
 
     # # Create BoxPlots (num coeffs)
-    x="brain_area"#"rounded_encoding" #rounded_encoding, brain_area, time_bin
+    x="rounded_encoding"#"rounded_encoding" #rounded_encoding, brain_area, time_bin. time_bin_and_brain_area
     y="num_of_chosen_coeffs" #num_of_chosen_coeffs, encoding
-    hue = ""#"brain_area" #None, rounded_encoding, brain_area, time_bin
-    query = AREA_QUERY#TIME_QUERY, AREA_QUERY
-    df_type = "kfolds"  # kfolds&corr, kfolds, corr
+    hue = "time_bin_and_brain_area"#"brain_area" #None, rounded_encoding, brain_area, time_bin. time_bin_and_brain_area
+    query = AREA_AND_TIME_QUERY #TIME_QUERY, AREA_QUERY, AREA_AND_TIME_QUERY
+    df_type = "kfolds&corr"  # kfolds&corr, kfolds, corr
     sig_test = "Mann-Whitney"#"t-test_welch"
     # violin_annot = True
 
+    # plot_encoding_num_coeffs_scatterplot(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
+    #                         category_by=hue, kfolds_threshold=kfolds_threshold, query=query, df_type=df_type)
     # plot_x_vs_num_of_coeffs(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
     #                         x=x, hue=hue, kfolds_threshold=kfolds_threshold, query=query, df_type=df_type, sig_test=sig_test)
     # run_all_boxplots(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, kfolds_threshold, df_type, sig_test)
@@ -1134,11 +1257,11 @@ if __name__ == '__main__':
 
     # # Venn Diagrams (which coeffs)
     # query = "rounded_encoding==0.4"  # TIME_QUERY, AREA_QUERY
-    col_to_compare = "brain_area"#"time_bin"#"brain_area"
-    group1 = "STG"#"STG" #"-0.4≤x<0"
-    group2 = "IFG"#"IFG"#"0≤x<0.4"
+    col_to_compare = "rounded_encoding"#"time_bin"#"brain_area"
+    group1 = "0.1"#"STG" #"-0.4≤x<0"
+    group2 = "0.4"#"IFG"#"0≤x<0.4"
     df_type = "kfolds&corr" #kfolds&corr, kfolds, corr
-    query = ""
+    query = f"(rounded_encoding=={group1})|(rounded_encoding=={group2})" # TIME_QUERY, AREA_QUERY
     top = 5
 
     # for encoding in ['0.0', '0.1', '0.2', '0.3', '0.4', '0.5']:
@@ -1148,9 +1271,9 @@ if __name__ == '__main__':
     # coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
     #             col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, query=query, df_type=df_type)
 
-    coeffs_values(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type,  top=top)
+    # coeffs_values(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type,  top=top)
 
     # coeffs_statistics(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type)
-    # pca_coeffs(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, query=query)
+    pca_coeffs(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, query=query)
 
     # overlap_by_area(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, interest_areas, kfolds_threshold, start_time_idx, end_time_idx)
