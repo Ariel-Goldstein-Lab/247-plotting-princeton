@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 from pandas import DataFrame
+import plotly.express as px
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from upsetplot import from_contents, UpSet
@@ -25,8 +26,8 @@ from itertools import combinations
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from scipy.stats import pearsonr
-
-from tfsplt_utils import load_electrode_names_and_locations, get_non_zero_coeffs_old, get_coeffs_df, get_coeffs_dfs, get_coeffs, _process_coeff_df, prepare_coeffs_df, _get_exploded_united_kfolds_and_corr
+from tqdm import tqdm
+from tfsplt_utils import get_coeffs_df, prepare_coeffs_df, _get_exploded_united_kfolds_and_corr
 
 
 AREA_QUERY = "(brain_area == 'STG') | (brain_area == 'IFG')"
@@ -174,52 +175,6 @@ def plot_coeff_kfold_agreement_over_time_histogram(data, time_points):
     # Show the plot
     fig.show()
 
-
-def overlap_by_area(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, interest_areas=None,
-                    kfolds_threshold=10, start_time_idx=0, end_time_idx=161):
-    elecs_df = load_electrode_names_and_locations(sid, filter_type)
-    areas = elecs_df["brain_area"].unique()
-
-    all_data_all_elec = {}
-    kfolds_all_elecs = {}
-
-    for area in areas:
-        if pd.isna(area) or area == "other":
-            continue
-        if interest_areas and area not in interest_areas:
-            continue
-        print("Processing area:", area)
-        areas_electrodes = elecs_df[elecs_df["brain_area"] == area]["full_elec_name"].to_list()
-        all_data_chosen_coeffs_dict, reliable_chosen_coeffs_dict = get_non_zero_coeffs_old(sid, areas_electrodes,
-                                                                                           model_info[
-                                                                                               "model_full_name"],
-                                                                                           model_info["layer"],
-                                                                                           model_info["context"],
-                                                                                           min_alpha, max_alpha,
-                                                                                           num_alphas, mode,
-                                                                                           kfolds_threshold,
-                                                                                           output_elec_name_prefix=area + "_")
-        for elec in all_data_chosen_coeffs_dict.keys():
-            all_data_chosen_coeffs = all_data_chosen_coeffs_dict[elec][1]
-            all_data_all_elec[elec] = list(
-                {item for sublist in all_data_chosen_coeffs[start_time_idx:end_time_idx] for item in
-                 sublist})  # Take union of coeffs in the selected time range
-            reliable_chosen_coeffs = reliable_chosen_coeffs_dict[elec][1]
-            kfolds_all_elecs[elec] = list(
-                {item for sublist in reliable_chosen_coeffs[start_time_idx:end_time_idx] for item in
-                 sublist})  # Take union of coeffs in the selected time range
-            kfolds_all_elecs[f"---------{area}---------"] = []  # To create a gap between areas in the plot
-    # Remove electrodes with empty entries
-    kfolds_all_elecs = {k: v for k, v in kfolds_all_elecs.items() if (v or "---" in k)}
-    content = from_contents(kfolds_all_elecs)
-    upset = UpSet(content, subset_size='count', show_counts=True, sort_categories_by='input', min_degree=2,
-                  min_subset_size=4, sort_by='cardinality')
-    upset.plot()
-    plt.show()
-
-    print("Done!")
-
-
 def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, x="rounded_encoding", hue=None, kfolds_threshold=10, query="",
                             violin_annot=True, df_type="kfolds&corr", sig_test="t-test"):
     """
@@ -235,12 +190,7 @@ def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, 
     :param kfolds_threshold:
     :return:
     """
-    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query="")
-    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
-        _, kfolds_df = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
-                                             num_alphas, mode, kfolds_threshold, query)
-    else:
-        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
 
     _plot_x_vs_num_coeffs(kfolds_df, max_alpha, min_alpha, model_info, num_alphas, x=x, hue=hue, filter_name=query,
                           kfolds_threshold=kfolds_threshold, sig_test=sig_test) #, violin_annot=violin_annot
@@ -474,7 +424,7 @@ def customize_time_xaxis(ax, x, n=20):
     ax.axvline(x=tick_positions[80], color='black', linewidth=0.5, alpha=0.7)
 
 def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
-                col_to_compare, group1, group2, kfolds_threshold=10, query="", df_type="kfolds&corr"):
+                col_to_compare, group1, group2, kfolds_threshold=10, emb_mod=None, query="", df_type="kfolds&corr"):
     """
     Finds which coeffs appear in which
     :param sid:
@@ -523,7 +473,7 @@ def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, 
 
     exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
         col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-        num_alphas, query, sid, coeff_type=df_type)
+        num_alphas, emb_mod, query, sid, coeff_type=df_type)
 
     set_colors = (COLOR_PALETTE[first_group_name], COLOR_PALETTE[second_group_name])
     venn2((first_group_all_coeffs, second_group_all_coeffs), (first_group_name, second_group_name), set_colors=set_colors)
@@ -587,16 +537,18 @@ def amount_distinct_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, n
     plt.show()
 
 def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold: int, max_alpha,
-                                min_alpha, mode, model_info, num_alphas, query: str, sid, coeff_type="kfolds&corr"):
+                                min_alpha, mode, model_info, num_alphas, emb_mod, query: str, sid, coeff_type="kfolds&corr"):
     query = get_group_query(col_to_compare, group1, group2, query)
 
     if coeff_type == "kfolds&corr" or coeff_type == "corr&kfolds":
         exploded_df, _ = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
-                                                           kfolds_threshold, query)
+                                                           kfolds_threshold, emb_mod=emb_mod, query=query)
     else:
         non_zero_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-                                        num_alphas, sid, query=query, df_type=coeff_type)
+                                        num_alphas, sid, emb_mod=emb_mod, query=query, df_type=coeff_type)
         exploded_df = non_zero_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
+        calc_and_plot_prop("frequency", exploded_df, non_zero_df, coeff_type, model_info, axis_func=calc_axis_value_for_counts)
+        calc_and_plot_prop("mean", exploded_df, non_zero_df, coeff_type, model_info, axis_func=calc_axis_value_for_value)
         exploded_df.rename(columns={"chosen_coeffs_val": f"chosen_coeffs_val_{coeff_type}",}, inplace=True)
 
     first_group_name, second_group_name = sorted([group1, group2])
@@ -605,6 +557,10 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
         exploded_df.query(f"{col_to_compare} == '{first_group_name}'")["actual_chosen_coeffs"].to_list())
     second_group_all_coeffs = set(
         exploded_df.query(f"{col_to_compare} == '{second_group_name}'")["actual_chosen_coeffs"].to_list())
+
+    if coeff_type == "corr":
+        first_group_all_coeffs, second_group_all_coeffs, _= run_group_permutation_test(non_zero_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name,
+                                   second_group_name, exploded_df, n_permutations=5000)
 
     exploded_df[f"is_in_{first_group_name}"] = exploded_df["actual_chosen_coeffs"].isin(first_group_all_coeffs)
     exploded_df[f"is_in_{second_group_name}"] = exploded_df["actual_chosen_coeffs"].isin(second_group_all_coeffs)
@@ -618,24 +574,317 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
 
     return exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name
 
+def calc_axis_value_for_value(exploded_df, non_zero_df, coeff_type):
+    from scipy import stats
+
+    all_exp = non_zero_df.explode(["all_coeffs_index", "all_coeffs_val"])
+
+    del exploded_df
+    del non_zero_df
+    gc.collect()
+
+    if coeff_type == "corr":
+        all_exp["all_coeffs_val"] = np.abs(all_exp["all_coeffs_val"])
+    stats_df = all_exp.groupby(['all_coeffs_index', col_to_compare])['all_coeffs_val'].agg(
+        mean='mean',
+        se=stats.sem
+    ).reset_index()
+
+    del all_exp
+    gc.collect()
+
+    # Pivot to get brain areas as columns for mean
+    pivot_mean = stats_df.pivot(index='all_coeffs_index',
+                                columns=col_to_compare,
+                                values='mean')  # .fillna(0)
+    pivot_mean = pivot_mean.reset_index()
+
+    # Pivot to get brain areas as columns for SE
+    pivot_se = stats_df.pivot(index='all_coeffs_index',
+                              columns=col_to_compare,
+                              values='se')#.fillna(0)
+    pivot_se = pivot_se.reset_index()
+
+    # Rename columns to distinguish mean and SE
+    pivot_mean = pivot_mean.rename(columns={group1: f'{group1}_mean', group2: f'{group2}_mean'})
+    pivot_se = pivot_se.rename(columns={group1: f'{group1}_se', group2: f'{group2}_se'})
+
+    # Merge mean and SE DataFrames
+    result_df = pivot_mean.merge(pivot_se[['all_coeffs_index', f'{group1}_se', f'{group2}_se']],
+                                 on='all_coeffs_index')
+
+    epsilon = 1e-9
+    if coeff_type == "corr":
+        score_text = r'$\frac{|x - y|}{x + y + \epsilon}$'
+        result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
+                result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)  # np.sqrt(2) *
+
+    else:
+        score_text = r'$\frac{||x| - |y||}{|x| + |y| + \epsilon}$'
+        result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
+                result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)  # np.sqrt(2) *
+
+
+    # Get axis names
+    col_names = [f'{group1}_mean', f'{group2}_mean']
+    axis_names = [f'{group1} Abs Mean', f'{group2} Abs Mean']
+    coeff_name_col = "all_coeffs_index"
+
+    return result_df, col_names, axis_names, coeff_name_col, score_text
+
+def calc_axis_value_for_counts(exploded_df, non_zero_df, coeff_type):
+    score_text = r'$\frac{|x - y|}{x + y + \epsilon}$' #\sqrt{2} \cdot
+
+    counts = exploded_df.groupby(['actual_chosen_coeffs', col_to_compare]).size().reset_index(name='count')
+    # Pivot to get brain areas as columns
+    pivot_counts = counts.pivot(index='actual_chosen_coeffs',
+                                columns=col_to_compare,
+                                values='count').fillna(0)
+
+    # Reset index to make actual_chosen_coeffs a column
+    pivot_counts = pivot_counts.reset_index()
+    result = non_zero_df.groupby(col_to_compare)[["full_elec_name"]].nunique()
+
+    pivot_counts[group1] = pivot_counts[group1] / (result.loc[group1, "full_elec_name"] * 161)
+    pivot_counts[group2] = pivot_counts[group2] / (result.loc[group2, "full_elec_name"] * 161)
+
+    epsilon = 1e-9
+    pivot_counts["score"] = np.abs(pivot_counts[group2] - pivot_counts[group1]) / (pivot_counts[group2] + pivot_counts[group1] + epsilon) #np.sqrt(2) *
+    # pivot_counts["score"] = np.abs(np.log(np.clip(pivot_counts[group1], epsilon, 1.0)) - np.log(np.clip(pivot_counts[group2], epsilon, 1.0)))
+
+    # Get the two brain area names
+    col_names = [col for col in pivot_counts.columns if col != 'actual_chosen_coeffs']
+    axis_names = [f'Frequency in {col}' for col in col_names]
+
+    coeff_name_col = "actual_chosen_coeffs"
+
+    return pivot_counts, col_names, axis_names, coeff_name_col, score_text
+
+
+def plot_prop_scatter_plot(df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col):
+    # Create interactive scatter plot
+    fig = px.scatter(df,
+                     x=col_names[0],
+                     y=col_names[1],
+                     color='score',
+                     hover_name=coeff_name_col,
+                     hover_data={col_names[0]: True, col_names[1]: True, 'score': ':.3f'},
+                     labels={col_names[0]: axis_names[0],
+                             col_names[1]: axis_names[1],
+                             'score': ''
+                             # '|log(x)-log(y)|'#
+                             },
+                     title=f'Coefficient {calc_name} by {col_to_compare} ({coeff_type}, {model_info["model_short_name"]})',
+                     color_continuous_scale='sunsetdark',
+                     # range_color=[0, 1]
+                     )
+
+    # Make points smaller
+    fig.update_traces(marker=dict(size=4))
+
+    # Set the same range for both axes starting from 0
+    max_value = max(df[col_names[0]].max(), df[col_names[1]].max())
+    fig.update_xaxes(range=[0, max_value])
+    fig.update_yaxes(range=[0, max_value])
+
+    fig.update_layout(
+        width=800,
+        height=700,
+        hovermode='closest',
+        template='plotly_white',
+        xaxis=dict(
+            title_font=dict(size=18),
+            tickfont=dict(size=14)
+        ),
+        yaxis=dict(
+            title_font=dict(size=18),
+            tickfont=dict(size=14)
+        )
+    )
+
+    fig.update_coloraxes(colorbar_title_text='')  # Remove the default title
+
+    fig.add_annotation(
+        x=1.12,  # Position to the right of the plot
+        y=1.07,  # Above the colorbar
+        xref='paper',
+        yref='paper',
+        text=score_text,
+        showarrow=False,
+        font=dict(size=16)
+    )
+
+    fig.show()
+
+def plot_prop_histogram(score_df, calc_name, coeff_type, model_info):
+    # Histogram of
+    fig = px.histogram(
+        score_df,
+        x="score",
+        histnorm='probability',
+        title=f'Histogram of {calc_name} Score {col_to_compare} ({coeff_type}, {model_info["model_short_name"]})',
+        # color_discrete_sequence=['#636EFA']  # or try '#4C78A8', '#1f77b4', '#5E81AC'
+        color_discrete_sequence=['#F9A175'] #A0A8E8
+    )
+
+    fig.update_traces(
+        xbins=dict(size=0.02),
+        marker=dict(
+            line=dict(color='white', width=0.5)
+        ),
+        opacity=0.85
+    )
+
+    fig.update_layout(
+        width=700,
+        height=400,
+        template='plotly_white',
+        title=dict(
+            font=dict(size=16),
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis=dict(
+            title='Score',
+            tickformat='.2f',
+            gridcolor='rgba(0,0,0,0.05)',
+            range=[0, 1],
+            title_font=dict(size=18),
+            tickfont=dict(size=14)
+        ),
+        yaxis=dict(
+            title='Probability',
+            gridcolor='rgba(0,0,0,0.05)',
+            title_font=dict(size=18),
+            tickfont=dict(size=14)
+        ),
+        font=dict(family='Arial', size=12),
+        margin=dict(l=60, r=40, t=60, b=60),
+        bargap=0.001
+    )
+
+    fig.show()
+
+def calc_and_plot_prop(calc_name, exploded_df, non_zero_df, coeff_type, model_info, axis_func=calc_axis_value_for_counts):
+    # Group by both actual_chosen_coeffs and brain_area, then count occurrences
+    score_df, col_names, axis_names, coeff_name_col, score_text = axis_func(exploded_df, non_zero_df, coeff_type)
+    score_df['score'] = pd.to_numeric(score_df['score'])
+
+    plot_prop_scatter_plot(score_df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col)
+
+    group_com_text = f"{col_names[0]}>{col_names[0]}"
+    score_df[group_com_text] = score_df[col_names[0]] > score_df[col_names[1]]
+    print(f"Everything for {calc_name}")
+    print(f"\nWhere: {group_com_text}")
+    print(score_df[score_df[group_com_text] == True].sort_values(by="score", ascending=False)[:10])
+    print(f"\nWhere not: {group_com_text}")
+    print(score_df[score_df[group_com_text] == False].sort_values(by="score", ascending=False)[:10])
+    print("Where they are equal")
+    print(score_df.sort_values(by="score", ascending=True)[:10])
+
+    plot_prop_histogram(score_df, calc_name, coeff_type, model_info)
+
+
+
+def run_group_permutation_test(non_zero_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name, second_group_name, exploded_df, n_permutations=5000):
+    # only_in_first = first_group_all_coeffs - second_group_all_coeffs
+    # only_in_second = second_group_all_coeffs - first_group_all_coeffs
+    unique_for_single_group = first_group_all_coeffs ^ second_group_all_coeffs
+    nz_cp = non_zero_df.copy()
+
+    results = {}
+    removed_items_first_group = set()
+    removed_items_second_group = set()
+
+    for coeff in tqdm(unique_for_single_group, desc=f"Running permutation test"):
+        coeff = int(coeff)
+        nz_cp['val'] = nz_cp['all_coeffs_val'].apply(lambda x: x[coeff])
+
+        stg_size = (nz_cp['brain_area'] == 'STG').sum()
+        ifg_size = (nz_cp['brain_area'] == 'IFG').sum()
+
+        stg_mean = nz_cp[nz_cp['brain_area'] == 'STG']['val'].mean()
+        ifg_mean = nz_cp[nz_cp['brain_area'] == 'IFG']['val'].mean()
+        observed_diff = stg_mean - ifg_mean
+
+        all_values = nz_cp['val'].values
+        null_distribution = np.zeros(n_permutations)
+
+        for i in range(n_permutations):
+            permuted_values = np.random.permutation(all_values)
+            # Split according to original group sizes
+            perm_stg = permuted_values[:stg_size]
+            perm_ifg = permuted_values[stg_size:stg_size + ifg_size]
+            # Calculate difference in means
+            null_distribution[i] = perm_stg.mean() - perm_ifg.mean()
+
+        # Calculate p-value (two-tailed)
+        p_value = np.mean(np.abs(null_distribution) >= np.abs(observed_diff))
+        results[coeff] = {
+            'null_distribution': null_distribution,
+            'observed_difference': observed_diff,
+            'p_value': p_value
+        }
+
+        if p_value < 0.05:
+            if str(coeff) in first_group_all_coeffs and str(coeff) in second_group_all_coeffs:
+                group = "both groups"
+                raise "Problem! Not supposed to run on elements that are in both groups"
+            elif str(coeff) in first_group_all_coeffs:
+                group = first_group_name
+            elif str(coeff) in second_group_all_coeffs:
+                group = second_group_name
+            else:
+                group = "no group... (?!)"
+
+            # print(f"{coeff} that is in group {group} is OK!")
+        else:
+            if str(coeff) in first_group_all_coeffs and str(coeff) in second_group_all_coeffs:
+                group = "both groups"
+                raise "Problem! Not supposed to run on elements that are in both groups"
+            elif str(coeff) in first_group_all_coeffs:
+                group = first_group_name
+                first_group_all_coeffs.remove(str(coeff))
+                removed_items_first_group.add(coeff)
+            elif str(coeff) in second_group_all_coeffs:
+                group = second_group_name
+                second_group_all_coeffs.remove(str(coeff))
+                removed_items_second_group.add(coeff)
+            else:
+                group = "no group... (?!)"
+            # print(f"problem with {coeff} that is in group {group}, removing from the group")
+
+
+    print(f"Removed items from {first_group_name} group: {len(removed_items_first_group)}, items: {removed_items_first_group}")
+    print(f"Removed items from {second_group_name} group: {len(removed_items_second_group)}, items: {removed_items_second_group}")
+
+    # Example plot
+    example_idx = list(results.keys())[0]
+    null_dist = results[example_idx]['null_distribution']
+    observed = results[example_idx]['observed_difference']
+
+    plt.figure(figsize=(10, 6))
+    plt.hist(null_dist, bins=50, alpha=0.7, edgecolor='black')
+    plt.axvline(observed, color='red', linestyle='--', linewidth=2, label='Observed difference')
+    plt.xlabel('Difference in means (STG - IFG)')
+    plt.ylabel('Frequency')
+    plt.title(f'Null distribution for all_coeffs_index = {example_idx}')
+    plt.legend()
+    plt.show()
+
+    print(f"P-value: {results[example_idx]['p_value']:.4f}")
+
+    return first_group_all_coeffs, second_group_all_coeffs, results
+
+
+
+
 def get_group_query(col_to_compare, group1, group2, query: str) -> str:
     if query:
         query = "(" + query + f") & (({col_to_compare} == '{group1}') | ({col_to_compare} == '{group2}'))"
     else:
         query = f"(({col_to_compare} == '{group1}') | ({col_to_compare} == '{group2}'))"
     return query
-
-
-def prepare_kfolds_coeffs_df(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, query="") -> DataFrame:
-    _, kfolds_df = get_coeffs(sid, filter_type, model_info["model_full_name"], model_info["layer"], model_info["context"], min_alpha, max_alpha, num_alphas, mode,
-                              return_all_data_coeffs=False, return_all_data_encoding=False)
-
-    kfolds_df = _process_coeff_df(kfolds_df)
-
-    if query:
-        kfolds_df = kfolds_df.query(query)
-
-    return kfolds_df
 
 def run_all_boxplots(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, kfolds_threshold, df_type="kfolds&corr", sig_test="t-test"):
 
@@ -877,11 +1126,8 @@ def coeffs_values(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas
 def plot_encoding_num_coeffs_scatterplot_all_data(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
                                                   x="rounded_encoding", kfolds_threshold=10, query="", df_type="kfolds&corr"):
 
-    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
-        _, kfolds_df = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
-                                             num_alphas, mode, kfolds_threshold, query)
-    else:
-        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+
+    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
 
     # Create the scatter plot
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -937,11 +1183,7 @@ def darken_color(color, factor=0.7):
 
 def plot_encoding_num_coeffs_scatterplot(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, category_by="brain_area", kfolds_threshold=10, query="",
                                          df_type="kfolds&corr"):
-    if df_type == "kfolds&corr" or df_type == "corr&kfolds":
-        _, kfolds_df = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
-                                             num_alphas, mode, kfolds_threshold, query)
-    else:
-        kfolds_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, sid, query=query, df_type=df_type)
+    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
 
 
     # Statistical test:
@@ -1095,6 +1337,9 @@ def pca_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, m
     # kfolds_df = prepare_kfolds_coeffs_df(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, query)
     vectors_array = np.vstack(kfolds_df['all_coeffs_val'].values)
 
+    mask = ~np.isnan(vectors_array).any(axis=0)
+    vectors_array = vectors_array[:, mask]
+
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(vectors_array)
 
@@ -1225,6 +1470,10 @@ if __name__ == '__main__':
                    "gemma-scope9b": {"layer": 21, "context": 32, "embedding_size": 16384,
                                      "model_short_name": "gemma-scope",
                                      "model_full_name": "gemma-scope-9b-pt-res-canonical"},
+                   "gemma-scope9b-mlp": {"layer": 21, "context": 32, "embedding_size": 16384,
+                                     "model_short_name": "gemma-scope-mlp",
+                                     "model_full_name": "gemma-scope-9b-pt-mlp-canonical"},
+                   # [('200','230','201'),('129','199','132'),('76','175','80'),('56','142','60'),('27','94','32')]},
                    }
     time_points = np.linspace(-2, 2, 161)
     time_to_index = {t: i for i, t in enumerate(np.round(time_points, 3))}
@@ -1257,23 +1506,27 @@ if __name__ == '__main__':
 
     # # Venn Diagrams (which coeffs)
     # query = "rounded_encoding==0.4"  # TIME_QUERY, AREA_QUERY
-    col_to_compare = "rounded_encoding"#"time_bin"#"brain_area"
-    group1 = "0.1"#"STG" #"-0.4≤x<0"
-    group2 = "0.4"#"IFG"#"0≤x<0.4"
-    df_type = "kfolds&corr" #kfolds&corr, kfolds, corr
-    query = f"(rounded_encoding=={group1})|(rounded_encoding=={group2})" # TIME_QUERY, AREA_QUERY
+    col_to_compare = "brain_area"#"time_bin"#"brain_area"
+    df_type = "corr" #kfolds&corr, kfolds, corr
+    query = ""#""#f"(rounded_encoding=='{group1}')|(rounded_encoding=='{group2}')" # TIME_QUERY, AREA_QUERY
     top = 5
 
+    if col_to_compare == "time_bin":
+        group1 = "-0.4≤x<0"#"STG" #"-0.4≤x<0"
+        group2 = "0≤x<0.4"#"IFG"#"0≤x<0.4"
+    elif col_to_compare == "brain_area":
+        group1 = "STG"
+        group2 = "IFG"
     # for encoding in ['0.0', '0.1', '0.2', '0.3', '0.4', '0.5']:
     #     query = f"rounded_encoding=={encoding}"
     #     coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
     #                       col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, query=query)
-    # coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
-    #             col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, query=query, df_type=df_type)
+    coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
+                col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type)
 
     # coeffs_values(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type,  top=top)
 
     # coeffs_statistics(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type)
-    pca_coeffs(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, query=query)
+    # pca_coeffs(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, query=query, df_type=df_type)
 
     # overlap_by_area(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, interest_areas, kfolds_threshold, start_time_idx, end_time_idx)
