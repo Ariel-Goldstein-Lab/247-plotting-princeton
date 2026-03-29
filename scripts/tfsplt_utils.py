@@ -395,18 +395,6 @@ def get_coeffs_df(patient, mode, model_info, filter_type, min_alpha, max_alpha, 
                                       model_info, num_alphas, patient, emb_mod, query=query, df_type=df_type)
     return df
 
-# def get_exploded_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=""):
-#     if df_type == "lasso&corr" or df_type == "corr&lasso":
-#         exploded_df, _ = _get_exploded_united_kfolds_and_corr(sid, filter_type, model_info, min_alpha, max_alpha,
-#                                                               num_alphas, mode,
-#                                                               kfolds_threshold, query=query)
-#     else:
-#         non_zero_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-#                                         num_alphas, sid, emb_mod, query=query, df_type=df_type)
-#         exploded_df = non_zero_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
-#         exploded_df.rename(columns={"chosen_coeffs_val": f"chosen_coeffs_val_{df_type}", }, inplace=True)
-#     return exploded_df
-
 def prepare_lang_coeffs_df(sid, kfolds_threshold, query=""):
     import numpy as np
     import pandas as pd
