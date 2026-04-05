@@ -95,7 +95,7 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, filter_type, min_alpha, ma
                 # show_legend = True if row_idx == 2 else False
 
                 plot_encoding_dual_axis(row_idx, elec_df, plotting_info[line_type], False, fig, False, model_color=model_color) #True if "lasso" in line_type else False)
-                plot_coeffs_dual_axis(row_idx, elec_df, plotting_info[line_type], model_name,False, fig, False, [line_type], False, True, is_english)
+                plot_coeffs_dual_axis(row_idx, elec_df, plotting_info[line_type], model_name, False, fig, filter_type, [line_type], False, True, is_english, compare_only_encoding)
 
             overall_line_df = line_df.groupby("time").agg(
                 encoding_se=('encoding', sem),
@@ -315,226 +315,215 @@ def plot_encoding_coeffs_corr(electrode_names, corr_df, computed_corr_config, fi
 
 def plot_coeffs_heatmap(patient, mode, filter_type, min_alpha, max_alpha, amount_of_alphas,
                                        p_threshold, reliable_kfolds_threshold, models_info, models_to_plot, lines_to_plot,
-                                       save_dir, save_ending, emb_mod, sort_by, query=""):
+                                       save_dir, save_ending, emb_mod, sort_by_first, sort_by_second, query=""):
+    is_english = patient not in NON_ENGLISH_SID
+    save_dir = os.path.join(save_dir, f"coeffs_heatmaps_sorted_by_{sort_by_first}_then_by_{sort_by_second}{f'_{save_ending}' if save_ending else ''}")
 
-    save_dir = os.path.join(save_dir, f"coeffs_heatmaps_sorted_by_{sort_by}{f'_{save_ending}' if save_ending else ''}")
-    os.makedirs(save_dir, exist_ok=True)
     for model_name in models_to_plot:
         print(f"Processing model {model_name}")
+        save_dir_model = os.path.join(save_dir, model_name)
+        os.makedirs(save_dir_model, exist_ok=True)
         dfs = load_electrode_dfs_by_type(lines_to_plot, patient, filter_type, models_info[model_name], min_alpha, max_alpha,
                                          amount_of_alphas, mode, reliable_kfolds_threshold, emb_mod, query) # dict of models to dict of line_types to coeff_exploded_df
+        electrode_names_list = dfs[list(dfs.keys())[0]]["full_elec_name"].unique().tolist()
+        amount_of_electrodes = len(electrode_names_list)
+        plotting_info = get_plotting_info(models_info[model_name], reliable_kfolds_threshold)
 
+        for line_index, line_type in enumerate(lines_to_plot):
+            line_df = dfs[line_type]
+            # fig = make_subplots(rows=amount_of_electrodes * 2,
+            #                     cols=1,
+            #                     subplot_titles=[elec_name + suffix for elec_name in electrode_names_list for suffix in ["encoding", "heatmap"]],
+            #                     # vertical_spacing=0.04
+            #                     )
+            # # Link x-axes: for each pair, make the heatmap row match the encoding row
+            # for i in range(amount_of_electrodes):
+            #     encoding_row = i * 2 + 1  # rows 1, 3, 5, ...
+            #     heatmap_row = i * 2 + 2  # rows 2, 4, 6, ...
+            #
+            #     # xaxis1, xaxis3, xaxis5... are the "anchor" axes
+            #     anchor = f"x{encoding_row}" if encoding_row > 1 else "x"
+            #     heatmap_axis = f"xaxis{heatmap_row}"
+            #
+            #     fig.layout[heatmap_axis].matches = anchor
 
-        for elec_name in dfs[0]["full_elec_name"]:
-            print(f"Plotting coefficients heatmap for electrode {elec_name}")
-            plot_coeffs_heatmap_single_elec(elec_name, dfs, sort_by, save_dir)
+            for elec_idx, elec_name in enumerate(tqdm(electrode_names_list, desc="Processing electrodes"), start=1): # Row count start from 1 + first row reserved for the overall mean plot
+                # Create subplots with secondary y-axis
+                # fig = make_subplots(
+                #     rows=2, cols=1,
+                #     subplot_titles=["Encoding and Num of Coeffs", "Heatmap"],
+                #     # vertical_spacing=chosen_vertical_spacing,
+                #     specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+                #     shared_xaxes=True
+                # )
+                fig = make_subplots(
+                    rows=2, cols=1,
+                    # subplot_titles=["Encoding and Num of Coeffs", "Heatmap"],
+                    specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+                    shared_xaxes=True,
+                    row_heights=[0.15, 0.85],  # encoding strip is slim, heatmap gets the bulk
+                    vertical_spacing=0.0  # no gap between the two subplots
+                )
 
-    print(f"!!!!!! Plotting complete. HTML file saved as {save_dir} !!!!!!")
+                elec_df = line_df[line_df["full_elec_name"] == elec_name].sort_values("time_index")
+                plot_encoding_dual_axis(1, elec_df, plotting_info[line_type], True, fig, True)  # True if "lasso" in line_type else False)
+                plot_coeffs_dual_axis(1, elec_df, plotting_info[line_type], model_name, True, fig, filter_type, [line_type], False, True, is_english, compare_only_encoding)
+
+                customize_encoding_and_coeffs_dual_axis_layout(0, fig, filter_type, lines_to_plot, is_english, compare_only_encoding, fix_height=False)
+                plot_coeffs_single_heatmap(2, elec_df, fig, sort_by_first, sort_by_second)
+
+                # Add a title to the entire figure
+                fig.update_layout(
+                    title_text=f"{elec_name}_{line_type}_{model_name}_coeffs_heatmaps_sorted_by_{sort_by_first}_then_by_{sort_by_second}",  # Replace with your actual title
+                    # title_font_size=20,  # Optional: adjust font size
+                    title_x=0.5,  # Optional: centers the title (0-1 scale)
+                    title_font_family="Arial"  # Optional: specify font family
+                )
+                # fig.update_xaxes(showticklabels=True)
+
+                # Keep the encoding y-axis from auto-expanding
+                fig.update_yaxes(autorange=True, row=1, col=1)
+
+                if elec_idx == 2:
+                    fig.show()
+                save_path = os.path.join(save_dir_model, f"{line_type}_{elec_name}_coeffs_heatmap.html")
+                fig.write_html(save_path)
+            print(f"Finished with {line_type}")
+
+        # for elec_name in dfs[list(dfs.keys())[0]]["full_elec_name"].unique().tolist():
+        #     print(f"Plotting coefficients heatmap for electrode {elec_name}")
+        #     plot_coeffs_heatmap_single_elec(elec_name, dfs, sort_by, save_dir)
+
+    print(f"!!!!!! Plotting complete. HTML files saved as {save_dir} !!!!!!")
+    return
+
+def plot_coeffs_single_heatmap(row_idx, elec_df, fig, sort_by_first, sort_by_second=None):
+    exploded_df = elec_df.explode(["all_coeffs_index", "all_coeffs_val"])
+
+    # Create a pivot table: coeffs (rows) x time (columns)
+    coeffs_matrix = exploded_df.pivot_table(
+        index="all_coeffs_index",
+        columns="time",
+        values="all_coeffs_val",
+        aggfunc='first'
+    )
+
+    # Filter to only keep coeffs that are non-zero at some time
+    non_zero_mask = (coeffs_matrix != 0).any(axis=1)
+
+    n_coeffs = len(non_zero_mask)
+    fig_height = min(900, max(400, n_coeffs * 8))  # ~20 px per coefficient row, minimum 600
+
+    fig.update_layout(
+        title_text=save_ending,
+        title_x=0.5,
+        title_font_family="Arial",
+        height=fig_height,
+        margin=dict(t=60, b=40, l=80, r=20),  # tight margins help too
+    )
+
+    coeffs_matrix_filtered = coeffs_matrix[non_zero_mask]
+
+    # if coeffs_matrix_filtered.empty:
+    #     raise ValueError(f"Warning: No non-zero coefficients found for {elec_name} in {df_type}")
+
+    # Get the coefficient indices that remain after filtering
+    coeff_indices = coeffs_matrix_filtered.index.values
+    z_values = coeffs_matrix_filtered.values
+    time_values = coeffs_matrix_filtered.columns.values
+
+    sorted_indices = sort_coeffs(sort_by_first, sort_by_second, z_values, elec_df)
+
+    # Apply sorting
+    z_values_sorted = z_values[sorted_indices, :]
+    coeff_labels_sorted = coeff_indices[sorted_indices]
+
+    # Create heatmap
+    fig.add_trace(go.Heatmap(
+        z=(z_values_sorted != 0).astype(int),
+        x=time_values,
+        y=coeff_labels_sorted.astype(str),
+        colorscale='RdBu_r',  # Red-Blue colorscale, good for positive/negative values
+        zmid=0,  # Center colorscale at 0
+        showscale=True,
+        colorbar=dict(
+            title="Coeff Value",
+            len=0.85,
+            y=0.425,         # centers it within the heatmap row (0.85 / 2 ≈ 0.425)
+            yanchor="middle",
+            thickness=15,
+        ),
+    ), row=row_idx, col=1)
+
+    # # Update y-axis for this subplot
+    # fig.update_yaxes(title=f'{df_type} - Coeff Index', row=row_idx + 1, col=1)
+    #
+    # # Update layout
+    # fig.update_xaxes(title='Time (s)', row=len(dfs) + 1, col=1)
+    # fig.update_layout(
+    #     height=400 * (len(dfs) + 1),
+    #     width=1200,
+    #     template='simple_white',
+    #     title_text=f'Coefficients Heatmap - {elec_name}',
+    #     showlegend=False
+    # )
     return
 
 
-def plot_coeffs_heatmap_single_elec(elec_name, data_dfs, sort_by, save_dir):
-        # elec_name, max_alpha, min_alpha, mode, models_info, num_alphas, patient, sort_by, save_dir):
-    subplot_titles = [f"<b>Encoding of {patient}, {elec_name} ({mode})</b>"] + [
-        f"<b>Heatmap Non-Zero (Lasso) Coeffs of {model_name} - {patient}, {elec_name} ({mode})</b>"
-        for model_name in data_dfs.keys()]
-
-    # TODO: Different coeffs - for now only lasso
-
-    fig = make_subplots(rows=len(models_info) + 1,
-                        cols=1,
-                        subplot_titles=subplot_titles,
-                        vertical_spacing=0.04,
-                        shared_xaxes=True,
-                        )
-    for row_idx, model_name in enumerate(models_info.keys()):
-        # print(f"Processing model {model_name} for electrode {elec_name} ({row_idx + 1}/{len(models_info)})")
-        overall_used_coeffs = plot_heatmap_single_elec_single_model(row_idx + 1, 1, elec_name, fig, max_alpha,
-                                                                    min_alpha, mode, model_name, models_info,
-                                                                    num_alphas, patient, sort_by)
-        models_info[model_name]['overall_used_coeffs'] = overall_used_coeffs
-
-    # print("All models processed. Now customizing layout...")
-    customize_coeffs_heatmap_layout(fig, models_info)
-    # fig.show()
-    save_path = os.path.join(save_dir, f"{elec_name}_lasso.html")
-    fig.write_html(save_path)
-    # print(f"!!!!!! Plotting complete. HTML file saved as {save_path} !!!!!!")
+def sort_coeffs(sort_by_first, sort_by_second, z_values, elec_df):
+    first_sort = sort_coeffs_helper(sort_by_first, z_values, elec_df)
+    if not sort_by_second:
+        sort_indices = np.argsort(first_sort)
+    else:
+        second_sort = sort_coeffs_helper(sort_by_second, z_values, elec_df)
+        sort_indices = np.lexsort((second_sort, first_sort))
+    return sort_indices
 
 
-
-def plot_coeffs_heatmap_single_elec_old(elec_name, max_alpha, min_alpha, mode, models_info, num_alphas, patient, sort_by,
-                                        save_dir):
-    subplot_titles = [f"<b>Encoding of {patient}, {elec_name} ({mode})</b>"] + [
-        f"<b>Heatmap Non-Zero (Lasso) Coeffs of {models_info[model_name]['model_short_name']} - {patient}, {elec_name} ({mode})</b>"
-        for model_name in models_info.keys()]
-
-    # TODO: Different coeffs - for now only lasso
-
-    fig = make_subplots(rows=len(models_info) + 1,
-                        cols=1,
-                        subplot_titles=subplot_titles,
-                        vertical_spacing=0.04,
-                        shared_xaxes=True,
-                        )
-    for row_idx, model_name in enumerate(models_info.keys()):
-        # print(f"Processing model {model_name} for electrode {elec_name} ({row_idx + 1}/{len(models_info)})")
-        overall_used_coeffs = plot_heatmap_single_elec_single_model(row_idx + 1, 1, elec_name, fig, max_alpha,
-                                                                    min_alpha, mode, model_name, models_info,
-                                                                    num_alphas, patient, sort_by)
-        models_info[model_name]['overall_used_coeffs'] = overall_used_coeffs
-
-    # print("All models processed. Now customizing layout...")
-    customize_coeffs_heatmap_layout(fig, models_info)
-    # fig.show()
-    save_path = os.path.join(save_dir, f"{elec_name}_lasso.html")
-    fig.write_html(save_path)
-    # print(f"!!!!!! Plotting complete. HTML file saved as {save_path} !!!!!!")
-
-
-def customize_coeffs_heatmap_layout(fig, models_info):
-    # Customize encoding
-    fig.update_yaxes(title='Correlation (r)', showgrid=True, col=1, row=1)
-    fig.add_shape(type='line',
-                  x0=-2, x1=2,
-                  y0=0, y1=0,
-                  line=dict(color='black', width=2), row=1, col=1)
-    fig.add_shape(type='line',
-                  x0=0, x1=0,
-                  y0=-0.1, y1=0.5,
-                  line=dict(color='black', width=2), row=1, col=1)
-    fig.update_yaxes(title="Correlation (r)", col=1, row=1)
-
-    for i, model_name in enumerate(models_info.keys()):
-        overall_used_coeffs = models_info[model_name]['overall_used_coeffs']
-        embedding_size = models_info[model_name]['embedding_size']
-        subtitle = f"<br><i>Overall Used Coeffs: {overall_used_coeffs} / {embedding_size} ({overall_used_coeffs / embedding_size:.2%})</i>"
-        fig.layout.annotations[i + 1].text += subtitle
-
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=10, color='#e8e8e8'),
-        name='False',
-        showlegend=True,
-        legend="legend2"
-    ))
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=10, color='black'),  # , symbol='square'),
-        name='True',
-        showlegend=True,
-        legend="legend2"
-    ))
-    fig.update_xaxes(showticklabels=True, col=1)
-
-    fig.update_layout(height=1050 * (len(models_info) + 1),  # + 1 for the encoding row
-                      width=2000, template='simple_white',
-                      legend=dict(
-                          title="Encoding Methods",
-                          orientation="v",
-                          yanchor="top",
-                          y=1,
-                          xanchor="left",
-                          x=1.02,
-                          bgcolor="rgba(255,255,255,0.8)",
-                          bordercolor="gray",
-                          borderwidth=1
-                      ),
-                      legend2=dict(
-                          title="Coeff Non-Zero",
-                          orientation="v",
-                          yanchor="top",
-                          y=0.755,
-                          xanchor="left",
-                          x=1.02,
-                          bgcolor="rgba(255,255,255,0.8)",
-                          bordercolor="gray",
-                          borderwidth=1
-                      )
-
-                      # margin=dict(l=50, r=50, t=50, b=50),
-                      )
-
-    for i in range(2, len(models_info) + 2):
-        fig.update_yaxes(title='Coeff Index', showgrid=False, col=1, row=i)
-    fig.update_xaxes(title='Time', showgrid=False, tickmode='linear', dtick=0.5, col=1)
-
-
-def plot_heatmap_single_elec_single_model(row_idx, col_idx, elec_name, fig, max_alpha, min_alpha, mode, model_name,
-                                          models_info, num_alphas, patient, sort_by):
-
-    for line_type in plots_data.keys():
-        plot_encoding(1, 1, model_name, models_info, line_type, plots_data, True, fig)
-
-    # Create a True-False matrix of coefficients according to if they are non zero
-    is_coeffs_nonzero = coeffs != 0
-    non_zero_coeffs_row_indx = np.where(np.any(is_coeffs_nonzero, axis=1))[0]  # Get indices of non-zero rows
-
-    x_values = np.linspace(-2, 2, is_coeffs_nonzero.shape[1])
-    row_labels = non_zero_coeffs_row_indx
-    # z_values = is_coeffs_nonzero[non_zero_coeffs_row_indx, :]
-    z_values = coeffs[non_zero_coeffs_row_indx, :]  # Only keep rows with at least one non-zero coefficient
-
+def sort_coeffs_helper(sort_by, z_values, elec_df):
+    # Sort the coefficients based on the sort_by parameter
     if sort_by == "sum":
-        features_array = -z_values.sum(axis=1)  # Sort by the number of non-zero coefficients in each row
-        sort_indices = np.argsort(features_array)
+        features_array = -np.abs(z_values).sum(axis=1)  # Sort by sum of absolute values
     elif sort_by == "first_true":
-        # features_array = np.array([
-        #     np.argmax(row) if np.any(row) else len(row)
-        #     for row in z_values
-        # ])
-        features_array = features_array_by_first(z_values)
-        sort_indices = np.argsort(features_array)
+        features_array = features_array_by_first(z_values != 0)
     elif sort_by == "last_true":
-        # features_array = np.array([
-        #     np.where(row)[0][-1] if np.any(row) else -1
-        #     for row in z_values
-        # ])
-        features_array = features_array_by_last(z_values)
-        sort_indices = np.argsort(features_array)
-    elif sort_by == "first_then_last_then_sum":
-        first_features_array = features_array_by_first(z_values)
-        last_features_array = features_array_by_last(z_values)
-        sum_features_array = -z_values.sum(axis=1)  # Sort by the number of non-zero coefficients in each row
-        sort_indices = np.lexsort((sum_features_array, last_features_array, first_features_array))
-    elif sort_by == "neuron_index":
-        sort_indices = np.arange(z_values.shape[0])
+        features_array = features_array_by_last(z_values != 0)
+    elif sort_by == "first_last_gap":
+        first_true = features_array_by_first(z_values != 0)
+        last_true = features_array_by_last(z_values != 0)
+        features_array = first_true-last_true
+    elif sort_by == "early_vs_late":
+        n = z_values.shape[1]
+        mid = n / 2
+        first_true = features_array_by_first(z_values != 0)
+        last_true = features_array_by_last(z_values != 0)
+        start_early = first_true < mid
+        end_early = last_true < mid
+
+        # 0: start early + end early, 1: start early + end late, 2: start late + end late
+        features_array = np.where(start_early & end_early, 2,
+                            np.where(start_early & ~end_early, 0, 1))
+    elif sort_by == "early_vs_late_continues":
+        n = z_values.shape[1]
+        first_true = features_array_by_first(z_values != 0)
+        last_true = features_array_by_last(z_values != 0)
+        features_array = first_true + last_true  # low = both early, high = both late, mid = one of each
+    elif sort_by == "early_vs_late_count":
+        n = z_values.shape[1]
+        mid = n // 2
+        count_early = (z_values!= 0)[:, :mid].sum(axis=1)  # number of True in first half
+        count_late = (z_values!= 0)[:, mid:].sum(axis=1)  # number of True in second half
+        total = (z_values!= 0).sum(axis=1) #1
+        features_array = (count_late - count_early) / np.where(total > 0, total, 1)  # in [-1, 1]. negative = leans early, positive = leans late
+    elif sort_by == "num_of_appear":
+        features_array = -(z_values != 0).sum(axis=1)
+    elif sort_by == "peak_encoding":
+        # Find the time point where encoding is at its peak
+        peak_encoding_idx = elec_df['encoding'].argmax()
+        features_array = -np.abs(z_values[:, peak_encoding_idx])
     else:
         raise ValueError(f"Unknown sort method: {sort_by}")
-
-    z_values_sorted = z_values[sort_indices, :]
-    row_labels_sorted = row_labels[sort_indices]
-
-    fig.add_trace(go.Heatmap(
-        z=z_values_sorted.astype(int),
-        x=x_values,
-        y=row_labels_sorted.astype(str),
-        colorscale=[[0, '#e8e8e8'], [1, 'black']],
-        showscale=False,
-        # colorbar=dict(
-        #         title="Coeff Non-Zero",
-        #         tickvals=[0, 1],
-        #         ticktext=['False', 'True'],
-        #         tickmode='array',  # Use explicit tick values
-        #         dtick=1,  # Set tick spacing to 1
-        #         len=0.3,  # Make colorbar shorter
-        #         thickness=15,  # Make it thinner
-        # ),
-    ), col=col_idx, row=row_idx + 1)
-
-    # Create heatmap
-    # fig.add_trace(go.Heatmap(
-    #     z=coeffs_matrix,
-    #     colorscale='Viridis',
-    #     colorbar=dict(title='Coefficient Value'),
-    #     name=model_short_name,
-    #     showlegend=True,
-    #     hoverongaps=False
-    # ), row=row_idx + 1, col=1)
-    return len(non_zero_coeffs_row_indx)
-
+    return features_array
 
 def features_array_by_first(z_values):
     features_array = np.argmax(z_values, axis=1)  # Get the index of the first True value in each row
@@ -544,9 +533,9 @@ def features_array_by_first(z_values):
 
 
 def features_array_by_last(z_values):
-    features_array = np.argmax(z_values[:, ::-1], axis=1)
+    features_array = (z_values.shape[1] - 1) - np.argmax(z_values[:, ::-1], axis=1)
     no_true_mask = ~z_values.any(axis=1)
-    features_array[no_true_mask] = z_values.shape[1]
+    features_array[no_true_mask] = -1  # or 0, sorts these to the beginning
     return features_array
 
 
@@ -924,7 +913,7 @@ def plot_coeffs_dual_axis(row_idx, elec_df, plots_info, model_name, show_legend,
 #     )
 
 
-def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig, filter_type, lines_to_plot, is_english=True, compare_only_encoding=False):
+def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig, filter_type, lines_to_plot, is_english=True, compare_only_encoding=False, fix_height=True):
     # Add horizontal line at y=0 for encoding (spans full x-axis)
     fig.add_hline(y=0,
                   line=dict(color='black', width=2),
@@ -985,8 +974,7 @@ def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig, fi
     # fig.update_yaxes(showgrid=True, secondary_y=False)
     # fig.update_yaxes(showgrid=True, secondary_y=True)
 
-    fig.update_layout(
-        height=300 * amount_of_electrodes,
+    layout_kwargs = dict(
         width=1200,
         template='simple_white',
         legend=dict(
@@ -1001,6 +989,12 @@ def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig, fi
             namelength=-1  # Set to -1 to show the full name
         )
     )
+        hoverlabel=dict(namelength=-1)  # Set to -1 to show the full name
+    )
+    if fix_height:
+        layout_kwargs['height'] = 300 * amount_of_electrodes
+
+    fig.update_layout(**layout_kwargs)
     # fig.update_yaxes(tickformat='.4f')
 
 
@@ -1071,13 +1065,16 @@ if __name__ == '__main__':
     models_str = "_".join(models_to_plot)
     lines_to_plot_str = "_".join(lines_to_plot)
     save_dir = "../results/figures/coeffs_analysis"
-    save_ending = f"{filter_type}_filter_models-{models_str}_lines-{lines_to_plot_str}_kfoldsthresh-{reliable_kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}{f'_{emb_mod}' if emb_mod else ''}_corr-{computed_corr_str}"  # Optional, can be empty string if not needed
-    sort_coeffs_by = "first_then_last_then_sum"  # Options: "sum", "first_then_last_then    _sum", "first_true", "last_true", "neuron_index", "raster"
+    sort_by_first = "early_vs_late_count"  # Options: "sum", "first_then_last_then_sum", "first_true", "last_true", "neuron_index", "raster", "num_of_appear"
+    sort_by_second = "first_last_gap"
 
+    save_ending = f"{filter_type}_filter_models-{models_str}_lines-{lines_to_plot_str}_kfoldsthresh-{reliable_kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}{f'_{emb_mod}' if emb_mod else ''}_corr-{computed_corr_str}"  # Optional, can be empty string if not needed
     print(save_ending)
     compare_only_encoding = False
     plot_encoding_and_coeffs_dual_axis(patient, mode, filter_type, min_alpha, max_alpha, amount_of_alphas, p_threshold, reliable_kfolds_threshold,
                                        models_info, models_to_plot, lines_to_plot, computed_corr_config, save_dir, save_ending, emb_mod, query=query, compare_only_encoding=compare_only_encoding)
 
-    # plot_coeffs_heatmap(patient, mode, models_info, filter_type, min_alpha, max_alpha, amount_of_alphas, p_threshold, reliable_kfolds_threshold, models_to_plot, lines_to_plot,
-    #                     sort_coeffs_by, save_dir, save_ending, emb_mod, query=query)
+    save_ending = f"{filter_type}_filter_kfoldsthresh-{reliable_kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}{f'_{emb_mod}' if emb_mod else ''}_corr-{computed_corr_str}"  # Optional, can be empty string if not needed
+    print(save_ending)
+    plot_coeffs_heatmap(patient, mode, filter_type, min_alpha, max_alpha, amount_of_alphas, p_threshold, reliable_kfolds_threshold, models_info, models_to_plot, lines_to_plot,
+                        save_dir, save_ending, emb_mod, sort_by_first, sort_by_second, query=query)
