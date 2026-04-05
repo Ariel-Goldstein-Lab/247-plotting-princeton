@@ -53,8 +53,9 @@ ORDERS = {"rounded_encoding": ROUNDED_ENCODING,
           }
 # 'x<-0.8':'#0077b6', '-0.8≤x<-0.4':'#0096c7', '-0.4≤x<0':'#00b4d8', '0≤x<0.4':'#ff9e00', '0.4≤x<0.8':'#ff9100', '0.8≤x':'#ff8500'
 COLOR_PALETTE = {"IFG": '#ff4da0', "STG": '#00c16a', #IFG-pink, STG-green
+                 "precentral": "#C6E7FF",
                  # 'x<-0.8':'#ff8500', '-0.8≤x<-0.4':'#ff9100', '-0.4≤x<0':'#ff9e00', '0≤x<0.4':'#00b4d8', '0.4≤x<0.8':'#0096c7', '0.8≤x':'#0077b6',
-                 '-0.4≤x<0':'#ff9d00', '0≤x<0.4':'#ff6e01', #Dark then light orange
+                 '-0.4≤x<0':'#1CC4F8', '0≤x<0.4':'#ff6e01', #Dark then light orange
                  # '-0.4≤x<0':'#ff9d00', '0≤x<0.4':'#64B5F6', #Dark then light
                  # '-0.4≤x<0':'#D1D1D1', '0≤x<0.4':'#A6A6A6', #Dark then light grey
                  'IFG_-0.4≤x<0':"#ff7fbc", 'IFG_0≤x<0.4':"#f72585", 'STG_-0.4≤x<0':"#26cc80", 'STG_0≤x<0.4':"#008e4d",
@@ -740,16 +741,16 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
         exploded_df, _ = _get_exploded_united_lasso_and_corr(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
                                                              kfolds_threshold, emb_mod=emb_mod, query=query)
     else:
-        non_zero_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
+        coeff_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
                                         num_alphas, sid, emb_mod=emb_mod, query=query, df_type=coeff_type)
-        exploded_df = non_zero_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
+        exploded_df = coeff_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
 
         # important_args = {"model_info": model_info, "emb_mod": emb_mod, "query": query, "coeff_type": coeff_type, "filter_type": filter_type}
-        calc_and_plot_prop("frequency", exploded_df, non_zero_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_freq_for_axis_value)
-        # calc_and_plot_prop("frequency within chosen", exploded_df, non_zero_df, coeff_type, model_info, axis_func=calc_freq_within_chosen_for_axis_value)
-        # calc_and_plot_prop("abs_mean", exploded_df, non_zero_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_abs_mean_for_axis_value)
-        # calc_and_plot_prop("abs_mean", exploded_df, non_zero_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_abs_mean_for_axis_value)
-        # calc_and_plot_prop("mean", exploded_df, non_zero_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_mean_for_axis_value)
+        calc_and_plot_prop("frequency", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_freq_for_axis_value)
+        # calc_and_plot_prop("frequency within chosen", exploded_df, coeff_df, coeff_type, model_info, axis_func=calc_freq_within_chosen_for_axis_value)
+        # calc_and_plot_prop("abs_mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_abs_mean_for_axis_value)
+        # calc_and_plot_prop("abs_mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_abs_mean_for_axis_value)
+        # calc_and_plot_prop("mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_mean_for_axis_value)
         exploded_df.rename(columns={"chosen_coeffs_val": f"chosen_coeffs_val_{coeff_type}",}, inplace=True)
 
     first_group_name, second_group_name = sorted([group1, group2])
@@ -759,9 +760,11 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
     second_group_all_coeffs = set(
         exploded_df.query(f"{col_to_compare} == '{second_group_name}'")["actual_chosen_coeffs"].to_list())
 
-    if coeff_type == "corr":
-        first_group_all_coeffs, second_group_all_coeffs, _= run_group_permutation_test(non_zero_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name,
-                                   second_group_name, exploded_df, n_permutations=5000)
+    if coeff_type == "corr" or coeff_type == "ridge": # Only done on corr/ridge because they have a continues value while lasso is either chosen or not
+        first_group_all_coeffs, second_group_all_coeffs, _= run_group_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name,
+                                                                                        second_group_name, n_permutations=5000)
+    run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs,
+                                 first_group_name, second_group_name, model_info, n_permutations=5000)
 
     exploded_df[f"is_in_{first_group_name}"] = exploded_df["actual_chosen_coeffs"].isin(first_group_all_coeffs)
     exploded_df[f"is_in_{second_group_name}"] = exploded_df["actual_chosen_coeffs"].isin(second_group_all_coeffs)
@@ -774,6 +777,7 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
     # assert exploded_df['group'].notna().all(), "Found None/NaN values in 'group' column" # turned off because it is None when it was removed from the groups in the permutation test
 
     return exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name
+
 def calc_abs_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, col_to_compare, group1, group2):
     del exploded_df
     gc.collect()
@@ -1133,7 +1137,7 @@ def calc_and_plot_prop(calc_name, exploded_df, non_zero_df, coeff_type, model_in
     # Group by both actual_chosen_coeffs and brain_area, then count occurrences
     score_df, col_names, axis_names, coeff_name_col, score_text = axis_func(exploded_df, non_zero_df, coeff_type, model_info["model_short_name"], col_to_compare, group1, group2)
     score_df['score'] = pd.to_numeric(score_df['score'])
-    score_df.to_pickle(f"/scratch/gpfs/HASSON/tk6637/princeton/temp_data/paper/violin_plot/{coeff_type}_{model_info['model_short_name']}_{'brain_area' if 'STG' in col_names else 'time_bin'}_{calc_name}_.pkl")
+    score_df.to_pickle(f"/scratch/gpfs/HASSON/tk6637/princeton/temp_data/paper/violin_plot/{coeff_type}_{model_info['model_short_name']}_{col_to_compare}_{calc_name}_.pkl")
 
     # plot_score_contour()
     plot_prop_scatter_plot_and_hist(score_df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col)
@@ -1148,13 +1152,89 @@ def calc_and_plot_prop(calc_name, exploded_df, non_zero_df, coeff_type, model_in
     print("\nWhere they are equal")
     print(score_df.sort_values(by="score", ascending=True)[:10])
 
+def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name, second_group_name, model_info, n_permutations=5000):
+    """
+    Pipeline-level permutation test for the Jaccard index J = |A ∩ B| / |A ∪ B|.
 
+    Shuffles condition labels n_permutations times and recomputes J each time to build a
+    null distribution. Shuffling is done at the appropriate unit level:
+      - brain_area: shuffle at electrode level (full_elec_name), preserving within-electrode
+        coefficient correlation structure.
+      - time_bin: shuffle at time_bin level, preserving within-time-bin structure across
+        electrodes.
 
-def run_group_permutation_test(non_zero_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name, second_group_name, exploded_df, n_permutations=5000):
+    Addresses reviewer concern: "Without a condition-label permutation test, the statistical
+    significance of J cannot be evaluated."
+    """
+    # Observed J
+    union = first_group_all_coeffs | second_group_all_coeffs
+    observed_J = len(first_group_all_coeffs & second_group_all_coeffs) / len(union)
+    print(f"Observed J = {observed_J:.4f}")
+
+    # Determine the unit at which to shuffle labels
+    if col_to_compare == "brain_area":
+        unit_col = "full_elec_name"
+    elif col_to_compare == "time_bin":
+        unit_col = "time_index"
+    else:
+        raise ValueError(f"Unsupported col_to_compare: {col_to_compare}. Add a unit_col mapping for it.")
+
+    unit_labels = (
+        coeff_df[[unit_col, col_to_compare]]
+        .drop_duplicates()
+        .set_index(unit_col)[col_to_compare]
+    )
+    units = unit_labels.index.values
+    labels = unit_labels.values
+
+    null_J = np.zeros(n_permutations)
+    for i in tqdm(range(n_permutations), desc="Jaccard permutation test"):
+        shuffled_labels = np.random.permutation(labels)
+        label_map = dict(zip(units, shuffled_labels))
+        perm_df = coeff_df.copy()
+        perm_df[col_to_compare] = perm_df[unit_col].map(label_map)
+        perm_exploded = perm_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
+        g1 = set(perm_exploded.query(f"{col_to_compare} == '{first_group_name}'")["actual_chosen_coeffs"])
+        g2 = set(perm_exploded.query(f"{col_to_compare} == '{second_group_name}'")["actual_chosen_coeffs"])
+        perm_union = g1 | g2
+        null_J[i] = len(g1 & g2) / len(perm_union)
+
+    # One-tailed p-value: how often does the null produce J <= observed
+    # (tests whether the observed overlap is lower than what chance predicts, i.e. groups are more distinct than chance)
+    p_value = np.mean(null_J <= observed_J)
+
+    print(f"Null J: mean = {null_J.mean():.4f}, std = {null_J.std():.4f}")
+    print(f"P-value (two-tailed): {p_value:.4f}")
+
+    # Plot
+    plt.figure(figsize=(10, 6))
+    plt.hist(null_J, bins=50, alpha=0.7, edgecolor='black', label='Null distribution')
+    plt.axvline(observed_J, color='red', linestyle='--', linewidth=2,
+                label=f'Observed J = {observed_J:.4f}')
+    plt.axvline(null_J.mean(), color='blue', linestyle=':', linewidth=1.5,
+                label=f'Null mean = {null_J.mean():.4f}')
+    plt.xlabel('Jaccard index (J)')
+    plt.ylabel('Frequency')
+    plt.title(
+        f'Pipeline permutation test: null J distribution\n'
+        f'{first_group_name} vs {second_group_name} | {model_info["model_short_name"]} | '
+        f'p = {p_value:.4f} (n={n_permutations})'
+    )
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    return observed_J, null_J, p_value
+
+def run_group_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name, second_group_name, n_permutations=5000):
+    """
+    For each coefficient that is in only one of the groups, runs a permutation test to see if the difference in means between the two groups is significant. If not, removes it from the group.
+    :return: Updated groups, and a dict with all the results
+    """
     # only_in_first = first_group_all_coeffs - second_group_all_coeffs
     # only_in_second = second_group_all_coeffs - first_group_all_coeffs
     unique_for_single_group = first_group_all_coeffs ^ second_group_all_coeffs
-    nz_cp = non_zero_df.copy()
+    coeff_df_cp = coeff_df.copy()
 
     results = {}
     removed_items_first_group = set()
@@ -1162,62 +1242,59 @@ def run_group_permutation_test(non_zero_df, first_group_all_coeffs, second_group
 
     for coeff in tqdm(unique_for_single_group, desc=f"Running permutation test"):
         coeff = int(coeff)
-        nz_cp['val'] = nz_cp['all_coeffs_val'].apply(lambda x: x[coeff])
+        # Get value of the coefficient for each time point and electrode in the original df
+        coeff_df_cp['val'] = coeff_df_cp['all_coeffs_val'].apply(lambda x: x[coeff])
 
-        stg_size = (nz_cp['brain_area'] == 'STG').sum()
-        ifg_size = (nz_cp['brain_area'] == 'IFG').sum()
+        first_group_size = (coeff_df_cp[col_to_compare] == first_group_name).sum()
+        second_group_size = (coeff_df_cp[col_to_compare] == second_group_name).sum()
 
-        stg_mean = nz_cp[nz_cp['brain_area'] == 'STG']['val'].mean()
-        ifg_mean = nz_cp[nz_cp['brain_area'] == 'IFG']['val'].mean()
-        observed_diff = stg_mean - ifg_mean
+        first_group_mean = coeff_df_cp[coeff_df_cp[col_to_compare] == first_group_name]['val'].mean()
+        second_group_mean = coeff_df_cp[coeff_df_cp[col_to_compare] == second_group_name]['val'].mean()
+        observed_diff = first_group_mean - second_group_mean
 
-        all_values = nz_cp['val'].values
+        group_mask = coeff_df_cp[col_to_compare].isin([first_group_name, second_group_name])
+        all_values = coeff_df_cp.loc[group_mask, 'val'].values
+
         null_distribution = np.zeros(n_permutations)
 
         for i in range(n_permutations):
             permuted_values = np.random.permutation(all_values)
             # Split according to original group sizes
-            perm_stg = permuted_values[:stg_size]
-            perm_ifg = permuted_values[stg_size:stg_size + ifg_size]
+            perm_first_group = permuted_values[:first_group_size]
+            perm_second_group = permuted_values[first_group_size:first_group_size + second_group_size]
             # Calculate difference in means
-            null_distribution[i] = perm_stg.mean() - perm_ifg.mean()
+            null_distribution[i] = perm_first_group.mean() - perm_second_group.mean()
 
-        # Calculate p-value (two-tailed)
-        p_value = np.mean(np.abs(null_distribution) >= np.abs(observed_diff))
+        # Calculate one-sided p-value: test whether coeff is higher in the group that selected it
+        if str(coeff) in first_group_all_coeffs and str(coeff) in second_group_all_coeffs:
+            raise ValueError("Problem! Not supposed to run on elements that are in both groups")
+        elif str(coeff) in first_group_all_coeffs:
+            p_value = np.mean(null_distribution >= observed_diff)
+        elif str(coeff) in second_group_all_coeffs:
+            p_value = np.mean(null_distribution <= observed_diff)
+        else:
+            raise ValueError("Problem! Coeff should be in at least one of the groups")
+
         results[coeff] = {
             'null_distribution': null_distribution,
             'observed_difference': observed_diff,
             'p_value': p_value
         }
 
-        if p_value < 0.05:
-            if str(coeff) in first_group_all_coeffs and str(coeff) in second_group_all_coeffs:
-                group = "both groups"
-                raise "Problem! Not supposed to run on elements that are in both groups"
-            elif str(coeff) in first_group_all_coeffs:
-                group = first_group_name
-            elif str(coeff) in second_group_all_coeffs:
-                group = second_group_name
-            else:
-                group = "no group... (?!)"
+    # FDR correction across all tested coefficients
+    coeffs_list = list(results.keys())
+    p_values = [results[c]['p_value'] for c in coeffs_list]
+    rejected, p_corrected, _, _ = multipletests(p_values, alpha=0.05, method='fdr_bh')
 
-            # print(f"{coeff} that is in group {group} is OK!")
-        else:
-            if str(coeff) in first_group_all_coeffs and str(coeff) in second_group_all_coeffs:
-                group = "both groups"
-                raise "Problem! Not supposed to run on elements that are in both groups"
-            elif str(coeff) in first_group_all_coeffs:
-                group = first_group_name
+    for coeff, is_significant, p_corr in zip(coeffs_list, rejected, p_corrected):
+        results[coeff]['p_value_corrected'] = p_corr
+        if not is_significant:
+            if str(coeff) in first_group_all_coeffs:
                 first_group_all_coeffs.remove(str(coeff))
                 removed_items_first_group.add(coeff)
             elif str(coeff) in second_group_all_coeffs:
-                group = second_group_name
                 second_group_all_coeffs.remove(str(coeff))
                 removed_items_second_group.add(coeff)
-            else:
-                group = "no group... (?!)"
-            # print(f"problem with {coeff} that is in group {group}, removing from the group")
-
 
     print(f"Removed items from {first_group_name} group: {len(removed_items_first_group)}, items: {removed_items_first_group}")
     print(f"Removed items from {second_group_name} group: {len(removed_items_second_group)}, items: {removed_items_second_group}")
@@ -1231,13 +1308,13 @@ def run_group_permutation_test(non_zero_df, first_group_all_coeffs, second_group
         plt.figure(figsize=(10, 6))
         plt.hist(null_dist, bins=50, alpha=0.7, edgecolor='black')
         plt.axvline(observed, color='red', linestyle='--', linewidth=2, label='Observed difference')
-        plt.xlabel('Difference in means (STG - IFG)')
+        plt.xlabel('Difference in means')
         plt.ylabel('Frequency')
         plt.title(f'Null distribution for all_coeffs_index = {example_idx}')
         plt.legend()
         plt.show()
 
-        print(f"P-value: {results[example_idx]['p_value']:.4f}")
+        print(f"corrected_p-value: {results[example_idx]['p_value_corrected']:.4f}")
 
     return first_group_all_coeffs, second_group_all_coeffs, results
 
@@ -2426,6 +2503,8 @@ if __name__ == '__main__':
                 else:
                     group1 = "STG"
                     group2 = "IFG"
+            else:
+                raise ValueError("col_to_compare must be either 'time_bin' or 'brain_area'")
             # for encoding in ['0.0', '0.1', '0.2', '0.3', '0.4', '0.5']:
             #     query = f"rounded_encoding=={encoding}"
             #     coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
