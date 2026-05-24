@@ -233,8 +233,17 @@ def plot_encoding_coeffs_corr(electrode_names, corr_df, computed_corr_config, fi
     # Create a mask for non-NaN values
     mask = ~np.isnan(corr_df['pval'])
 
+    corr_df["corrected_pval"] = pd.NA
+    corr_df["corrected_pval"] = corr_df["corrected_pval"].astype("Float64")  # nullable float
+    corr_df["rejected"] = pd.NA
+    corr_df["rejected"] = corr_df["rejected"].astype("boolean")  # nullable boolean
+
     # Apply FDR correction only to non-NaN values
-    rejected_nonan, pval_corrected_nonnan, _, _ = multipletests(corr_df['pval'][mask], method='fdr_bh')
+    not_nan_corr_df = corr_df['pval'][mask]
+    if len(not_nan_corr_df) > 0:
+        rejected_nonan, pval_corrected_nonnan, _, _ = multipletests(not_nan_corr_df, method='fdr_bh')
+        corr_df.loc[mask, "corrected_pval"] = pval_corrected_nonnan
+        corr_df.loc[mask, "rejected"] = rejected_nonan
 
     # Initialize corrected p-values with NaNs and put the corrected values back in their original positions
     # corr_df["corrected_pval"] = np.nan
@@ -242,14 +251,6 @@ def plot_encoding_coeffs_corr(electrode_names, corr_df, computed_corr_config, fi
     #
     # corr_df["rejected"] = np.nan
     # corr_df.loc[mask, "rejected"] = rejected_nonan
-
-    corr_df["corrected_pval"] = pd.NA
-    corr_df["corrected_pval"] = corr_df["corrected_pval"].astype("Float64")  # nullable float
-    corr_df.loc[mask, "corrected_pval"] = pval_corrected_nonnan
-
-    corr_df["rejected"] = pd.NA
-    corr_df["rejected"] = corr_df["rejected"].astype("boolean")  # nullable boolean
-    corr_df.loc[mask, "rejected"] = rejected_nonan
 
     # # Plot histogram of correlations
     # corr_hist_fig = go.Figure(data=[go.Histogram(x=corr_df["corr"], histnorm='percent', marker_color="#A865C9")])
@@ -306,7 +307,7 @@ def plot_encoding_coeffs_corr(electrode_names, corr_df, computed_corr_config, fi
             yref="y domain" if row_idx == 1 else f"y{2 * row_idx - 1} domain",
             showarrow=False,
             align="left",
-            font=dict(size=18, color="black"),
+            font=dict(size=24, color="black"),
             bgcolor="rgba(255,255,255,0.6)",
             row=row_idx,
             col=1,
@@ -694,7 +695,7 @@ def plot_encoding_dual_axis(row_idx, elec_df, plots_info, show_legend, fig, plot
         y=elec_df['encoding'],
         mode='lines',
         name=enc_name,
-        line=dict(color=f"rgb({','.join(color)})", width=2, dash=dash),
+        line=dict(color=f"rgb({','.join(color)})", width=3, dash=dash),
         legendgroup=enc_name,
         showlegend=show_legend,
         yaxis="y2" if dual_axis else "y1"
@@ -732,13 +733,13 @@ def plot_encoding_num_coeffs_scatter(df, model_name, line_type):
 
     # Set fixed figure size
     fig.update_layout(
-        width=500,
+        width=800,
         height=500,
         template='simple_white',
-        xaxis_title_font_size=20,
-        yaxis_title_font_size=20,
-        xaxis_tickfont_size=18,
-        yaxis_tickfont_size=18,
+        xaxis_title_font_size=28,
+        yaxis_title_font_size=28,
+        xaxis_tickfont_size=24,
+        yaxis_tickfont_size=24,
     )
 
     # Make points smaller
@@ -759,7 +760,7 @@ def plot_encoding_num_coeffs_scatter(df, model_name, line_type):
         yref="y domain",
         showarrow=False,
         align="left",
-        font=dict(size=18, color="black"),
+        font=dict(size=24, color="black"),
         bgcolor="rgba(255,255,255,0.6)"
     )
 
@@ -833,7 +834,7 @@ def plot_coeffs_dual_axis(row_idx, elec_df, plots_info, model_name, show_legend,
         mode='lines',
         name=coeffs_name,
         legendgroup=coeffs_name,
-        line=dict(color=f"rgb({','.join(line_color)})", width=2, dash=dash),
+        line=dict(color=f"rgb({','.join(line_color)})", width=3, dash=dash),
         showlegend=show_legend,
         yaxis="y1"
     ), row=row_idx, col=1, secondary_y=False)
@@ -957,19 +958,21 @@ def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig, fi
 
     for i in range(1, amount_of_electrodes + 2):
         fig.update_yaxes(title="Encoding (r)",
-                         title_font=dict(color=enc_axis_color, size=20),
-                         tickfont=dict(color=enc_axis_color, size=18),
+                         title_font=dict(color=enc_axis_color, size=28),
+                         tickfont=dict(color=enc_axis_color, size=24),
                          linecolor=enc_axis_color,
                          row=i, col=1, secondary_y=True)
         fig.update_yaxes(title="Proportion of Coefficients",#"Number of Coeffs",
-                         title_font=dict(color=coeffs_axis_color, size=20),
-                         tickfont=dict(color=coeffs_axis_color, size=18),
+                         title_font=dict(color=coeffs_axis_color, size=28),
+                         tickfont=dict(color=coeffs_axis_color, size=24),
                          linecolor=coeffs_axis_color,
+                         # tickformat='.1f',
+                         dtick=0.1,
                          row=i, col=1, secondary_y=False)
 
     fig.update_xaxes(title="Time (s)",
-                 title_font=dict(size=20),
-                 tickfont=dict(size=18),
+                 title_font=dict(size=28),
+                 tickfont=dict(size=24),
                      title_standoff=11)#, showgrid=True)
     # fig.update_yaxes(showgrid=True, secondary_y=False)
     # fig.update_yaxes(showgrid=True, secondary_y=True)
@@ -988,7 +991,7 @@ def customize_encoding_and_coeffs_dual_axis_layout(amount_of_electrodes, fig, fi
         hoverlabel=dict(namelength=-1)  # Set to -1 to show the full name
     )
     if fix_height:
-        layout_kwargs['height'] = 300 * amount_of_electrodes
+        layout_kwargs['height'] = (layout_kwargs['width'] // 2.75) * (amount_of_electrodes + 1)
 
     fig.update_layout(**layout_kwargs)
     # fig.update_yaxes(tickformat='.4f')

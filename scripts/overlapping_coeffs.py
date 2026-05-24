@@ -429,189 +429,91 @@ def customize_time_xaxis(ax, x, n=20):
     tick_positions = ax.get_xticks()
     ax.axvline(x=tick_positions[80], color='black', linewidth=0.5, alpha=0.7)
 
+def coeff_scatter(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, col_to_compare, group1, group2,
+                  kfolds_threshold=10, emb_mod=None, query="", df_type="lasso&corr", save_path=None):
+    coeff_df, exploded_df = get_group_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha,
+                                             min_alpha, mode, model_info, num_alphas, emb_mod, query, sid,
+                                             coeff_type=df_type)
+    calc_and_plot_scatters(exploded_df, coeff_df, df_type, model_info, col_to_compare, group1, group2, save_path)
+
+
+def calc_and_plot_scatters(exploded_df, coeff_df, df_type, model_info, col_to_compare, group1, group2, save_path):
+    calc_and_plot_single_scatter("frequency", exploded_df, coeff_df, df_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_freq_for_axis_value)
+    # calc_and_plot_prop("frequency within chosen", exploded_df, coeff_df, df_type, model_info, axis_func=calc_freq_within_chosen_for_axis_value)
+    # calc_and_plot_prop("abs_mean", exploded_df, coeff_df, df_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_abs_mean_for_axis_value_old)
+    calc_and_plot_single_scatter("abs_mean", exploded_df, coeff_df, df_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_abs_mean_for_axis_value)
+    # calc_and_plot_prop("mean", exploded_df, coeff_df, df_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_mean_for_axis_value)
+
 def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
                     col_to_compare, group1, group2, kfolds_threshold=10, emb_mod=None, query="", df_type="lasso&corr",
-                text_shift_left=0.2, text_shift_right=0.2):
-    def create_venn_diagram(group1_only, overlap, group2_only,
-                            label1="Group A", label2="Group B",
-                            title="Venn Diagram",
-                            color1="red", color2="blue", overlap_color="purple",
-                            text1=None, text2=None, text_overlap=None,
-                            font_size=14,
-                            text_shift_right=0.0,
-                            text_shift_left=0.0,
-                            edge_color="darkgrey",
-                            edge_width=1.0):
-        """
-        Create a 2-circle Venn diagram with custom colors and text.
+                text_shift_left=0.2, text_shift_right=0.2, save_path=None):
 
-        Parameters:
-        -----------
-        group1_only : int
-            Number of elements only in group 1 (not in group 2)
-        overlap : int
-            Number of elements in both groups
-        group2_only : int
-            Number of elements only in group 2 (not in group 1)
-        label1 : str
-            Label for the first circle
-        label2 : str
-            Label for the second circle
-        title : str
-            Title for the diagram
-        color1 : str
-            Color for the first circle (group 1 only area)
-        color2 : str
-            Color for the second circle (group 2 only area)
-        overlap_color : str
-            Color for the overlap area (both groups)
-        text1 : str or None
-            Custom text for group 1 only area. If None, shows the number. Use "" to hide.
-        text2 : str or None
-            Custom text for group 2 only area. If None, shows the number. Use "" to hide.
-        text_overlap : str or None
-            Custom text for overlap area. If None, shows the number. Use "" to hide.
-        font_size : int or float
-            Font size for the text in the circles (default: 14)
-        text_outside : bool
-            If True, position text labels outside the circles (default: False)
-        edge_color : str or None
-            Color for the circle outlines. Use None for no outline (default: "darkgrey")
-        edge_width : float
-            Width of the circle outlines in points (default: 1.0)
-        """
-        # Create the Venn diagram
-        # venn2 takes a tuple of (Ab, aB, AB) where:
-        # Ab = only in A
-        # aB = only in B
-        # AB = in both A and B
-        v = venn2(subsets=(group1_only, group2_only, overlap),
-                  set_labels=(label1, label2))
+    coeff_df, exploded_df = get_group_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, emb_mod, query, sid, coeff_type=df_type)
+    first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name, _ = _get_groups_distinct_coeffs(col_to_compare, group1, group2, exploded_df, coeff_df, coeff_type=df_type)
 
-        # Customize colors
-        # v.get_patch_by_id('10') is the part only in set A (group 1 only)
-        # v.get_patch_by_id('01') is the part only in set B (group 2 only)
-        # v.get_patch_by_id('11') is the intersection (overlap)
+    create_venn_diagram(first_group_name, second_group_name, first_group_all_coeffs, second_group_all_coeffs,
+                        title=f"Coefficients for each group, type of coeffs - {df_type}"
+                              + (f"\nModel: {model_info['model_short_name']} (k={kfolds_threshold},α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
+                              + (f"\nfilter={query}" if query else ""),
+                        color1=COLOR_PALETTE[first_group_name],
+                        color2=COLOR_PALETTE[second_group_name],
+                        overlap_color="#E0DADF",
+                        font_size=25,
+                        text_shift_left=text_shift_left,
+                        text_shift_right=text_shift_right,
+                        edge_color="black",
+                        edge_width=0.8,
+                        fig_name="venn",
+                        save_path=save_path)
 
-        if v.get_patch_by_id('10'):
-            v.get_patch_by_id('10').set_color(color1)
-            v.get_patch_by_id('10').set_alpha(0.6)
-            if edge_color:
-                v.get_patch_by_id('10').set_edgecolor(edge_color)
-                v.get_patch_by_id('10').set_linewidth(edge_width)
+def create_venn_diagram(first_group_name, second_group_name, first_group_all_coeffs, second_group_all_coeffs,
+                        title="Venn Diagram",
+                        color1="red", color2="blue", overlap_color="purple",
+                        font_size=14,
+                        text_shift_right=0.0,
+                        text_shift_left=0.0,
+                        edge_color="darkgrey",
+                        edge_width=1.0,
+                        fig_name="", save_path=None):
+    """
+    Create a 2-circle Venn diagram with custom colors and text.
 
-        if v.get_patch_by_id('01'):
-            v.get_patch_by_id('01').set_color(color2)
-            v.get_patch_by_id('01').set_alpha(0.6)
-            if edge_color:
-                v.get_patch_by_id('01').set_edgecolor(edge_color)
-                v.get_patch_by_id('01').set_linewidth(edge_width)
+    Parameters:
+    -----------
+    group1_only : int
+        Number of elements only in group 1 (not in group 2)
+    overlap : int
+        Number of elements in both groups
+    group2_only : int
+        Number of elements only in group 2 (not in group 1)
+    label1 : str
+        Label for the first circle
+    label2 : str
+        Label for the second circle
+    title : str
+        Title for the diagram
+    color1 : str
+        Color for the first circle (group 1 only area)
+    color2 : str
+        Color for the second circle (group 2 only area)
+    overlap_color : str
+        Color for the overlap area (both groups)
+    text1 : str or None
+        Custom text for group 1 only area. If None, shows the number. Use "" to hide.
+    text2 : str or None
+        Custom text for group 2 only area. If None, shows the number. Use "" to hide.
+    text_overlap : str or None
+        Custom text for overlap area. If None, shows the number. Use "" to hide.
+    font_size : int or float
+        Font size for the text in the circles (default: 14)
+    text_outside : bool
+        If True, position text labels outside the circles (default: False)
+    edge_color : str or None
+        Color for the circle outlines. Use None for no outline (default: "darkgrey")
+    edge_width : float
+        Width of the circle outlines in points (default: 1.0)
+    """
 
-        if v.get_patch_by_id('11'):
-            v.get_patch_by_id('11').set_color(overlap_color)
-            v.get_patch_by_id('11').set_alpha(0.6)
-            if edge_color:
-                v.get_patch_by_id('11').set_edgecolor(edge_color)
-                v.get_patch_by_id('11').set_linewidth(edge_width)
-
-        # Customize text labels
-        # If custom text is provided, replace the default numbers
-        if text1 is not None and v.get_label_by_id('10'):
-            v.get_label_by_id('10').set_text(text1)
-
-        if text2 is not None and v.get_label_by_id('01'):
-            v.get_label_by_id('01').set_text(text2)
-
-        if text_overlap is not None and v.get_label_by_id('11'):
-            v.get_label_by_id('11').set_text(text_overlap)
-
-        # Set font size for all labels
-        if v.get_label_by_id('10'):
-            v.get_label_by_id('10').set_fontsize(font_size)
-
-        if v.get_label_by_id('01'):
-            v.get_label_by_id('01').set_fontsize(font_size)
-
-        if v.get_label_by_id('11'):
-            v.get_label_by_id('11').set_fontsize(font_size)
-
-        # Move text outside if requested
-        # Get current positions and adjust them
-        if v.get_label_by_id('10'):
-            pos = v.get_label_by_id('10').get_position()
-            # Move left circle text further left
-            v.get_label_by_id('10').set_position((pos[0] - text_shift_left, pos[1]))
-
-        if v.get_label_by_id('01'):
-            pos = v.get_label_by_id('01').get_position()
-            # Move right circle text further right
-            v.get_label_by_id('01').set_position((pos[0] + text_shift_right, pos[1]))
-
-        # if v.get_label_by_id('11'):
-        #     pos = v.get_label_by_id('11').get_position()
-        #     # Move overlap text down
-        #     v.get_label_by_id('11').set_position((pos[0], pos[1] - 0.3))
-
-        plt.title(title)
-        plt.show()
-
-    def create_venn_from_totals(total_group1, total_group2, overlap,
-                                label1="Group A", label2="Group B",
-                                title="Venn Diagram",
-                                color1="red", color2="blue", overlap_color="purple",
-                                text1=None, text2=None, text_overlap=None,
-                                font_size=14,
-                                text_outside=False,
-                                edge_color="darkgrey",
-                                edge_width=1.0):
-        """
-        Create a 2-circle Venn diagram from total group sizes with custom colors and text.
-
-        Parameters:
-        -----------
-        total_group1 : int
-            Total number of elements in group 1
-        total_group2 : int
-            Total number of elements in group 2
-        overlap : int
-            Number of elements in both groups
-        label1 : str
-            Label for the first circle
-        label2 : str
-            Label for the second circle
-        title : str
-            Title for the diagram
-        color1 : str
-            Color for the first circle (group 1 only area)
-        color2 : str
-            Color for the second circle (group 2 only area)
-        overlap_color : str
-            Color for the overlap area (both groups)
-        text1 : str or None
-            Custom text for group 1 only area. If None, shows the number. Use "" to hide.
-        text2 : str or None
-            Custom text for group 2 only area. If None, shows the number. Use "" to hide.
-        text_overlap : str or None
-            Custom text for overlap area. If None, shows the number. Use "" to hide.
-        font_size : int or float
-            Font size for the text in the circles (default: 14)
-        text_outside : bool
-            If True, position text labels outside the circles (default: False)
-        edge_color : str or None
-            Color for the circle outlines. Use None for no outline (default: "darkgrey")
-        edge_width : float
-            Width of the circle outlines in points (default: 1.0)
-        """
-        group1_only = total_group1 - overlap
-        group2_only = total_group2 - overlap
-
-        create_venn_diagram(group1_only, overlap, group2_only, label1, label2, title,
-                            color1, color2, overlap_color, text1, text2, text_overlap,
-                            font_size, text_outside, edge_color, edge_width)
-
-    exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
-        col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-        num_alphas, emb_mod, query, sid, coeff_type=df_type)
     first_group_all_coeffs = {int(coeff) for coeff in first_group_all_coeffs}
     second_group_all_coeffs = {int(coeff) for coeff in second_group_all_coeffs}
 
@@ -627,67 +529,146 @@ def coeffs_venn(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, 
     group1_only = round((group1_unique_amount / divide_by) * 100, 1) * 10
     overlap = round((overlap_amount / divide_by) * 100, 1) * 10
     group2_only = round((group2_unique_amount / divide_by) * 100, 1) * 10
-    create_venn_diagram(
-        label1=first_group_name, #"" if col_to_compare == "brain_area" else "before" if col_to_compare == "time" else "",
-        label2=second_group_name, #"STG" if col_to_compare == "brain_area" else "after" if col_to_compare == "time" else "",
-        color1=COLOR_PALETTE[first_group_name], #"#FFB7D9" if col_to_compare == "area" else "#FFC599" if col_to_compare == "time" else "",
-        color2=COLOR_PALETTE[second_group_name], #"#99E6C3" if col_to_compare == "area" else "#9EE6FC" if col_to_compare == "time" else "",
-        overlap_color="#E0DADF",
-        group1_only=group1_only,
-        overlap=overlap,
-        group2_only=group2_only,
-        title=    f"Coefficients for each group, type of coeffs - {df_type}"
-                  + (f"\nModel: {model_info['model_short_name']} (k={kfolds_threshold},α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
-                  + (f"\nfilter={query}" if query else ""),
-        text1=f"{group1_only / 10}%",
-        text2=f"{group2_only / 10}%",
-        text_overlap=f"{overlap / 10}%",
-        font_size=25,
-        text_shift_left=text_shift_left,
-        text_shift_right=text_shift_right,
-        edge_color="black",
-        edge_width=0.8,
-    )
 
-def coeffs_venn_old(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
-                col_to_compare, group1, group2, kfolds_threshold=10, emb_mod=None, query="", df_type="lasso&corr"):
-    """
-    Finds which coeffs appear in which
-    :param sid:
-    :param filter_type:
-    :param model_info:
-    :param min_alpha:
-    :param max_alpha:
-    :param num_alphas:
-    :param mode:
-    :param col_to_compare:
-    :param kfolds_threshold:
-    :return:
-    """
-    exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
-        col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-        num_alphas, emb_mod, query, sid, coeff_type=df_type)
-    first_group_all_coeffs = {int(coeff) for coeff in first_group_all_coeffs}
-    second_group_all_coeffs = {int(coeff) for coeff in second_group_all_coeffs}
+    text1 = f"{group1_only / 10}%"
+    text2 = f"{group2_only / 10}%"
+    text_overlap = f"{overlap / 10}%"
 
-    print(f"\nOnly in {first_group_name} ({len(first_group_all_coeffs - second_group_all_coeffs)}): {first_group_all_coeffs - second_group_all_coeffs}")
-    print(f"\nOnly in {second_group_name} ({len(second_group_all_coeffs - first_group_all_coeffs)}): {second_group_all_coeffs - first_group_all_coeffs}")
-    print(f"\nIn both groups ({len(second_group_all_coeffs & first_group_all_coeffs)}): {second_group_all_coeffs & first_group_all_coeffs}")
 
-    set_colors = (COLOR_PALETTE[first_group_name], COLOR_PALETTE[second_group_name])
-    venn2((first_group_all_coeffs, second_group_all_coeffs), (first_group_name, second_group_name), set_colors=set_colors)
-    plt.title(f"Coefficients for each group, type of coeffs - {df_type}"
-              + (f"\nModel: {model_info['model_short_name']} (α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
-              + (f"\nfilter={query}" if query else ""))
+    # Create the Venn diagram
+    # venn2 takes a tuple of (Ab, aB, AB) where:
+    # Ab = only in A
+    # aB = only in B
+    # AB = in both A and B
+    v = venn2(subsets=(group1_only, group2_only, overlap),
+              set_labels=(first_group_name, second_group_name))
+
+    # Customize colors
+    # v.get_patch_by_id('10') is the part only in set A (group 1 only)
+    # v.get_patch_by_id('01') is the part only in set B (group 2 only)
+    # v.get_patch_by_id('11') is the intersection (overlap)
+
+    if v.get_patch_by_id('10'):
+        v.get_patch_by_id('10').set_color(color1)
+        v.get_patch_by_id('10').set_alpha(0.6)
+        if edge_color:
+            v.get_patch_by_id('10').set_edgecolor(edge_color)
+            v.get_patch_by_id('10').set_linewidth(edge_width)
+
+    if v.get_patch_by_id('01'):
+        v.get_patch_by_id('01').set_color(color2)
+        v.get_patch_by_id('01').set_alpha(0.6)
+        if edge_color:
+            v.get_patch_by_id('01').set_edgecolor(edge_color)
+            v.get_patch_by_id('01').set_linewidth(edge_width)
+
+    if v.get_patch_by_id('11'):
+        v.get_patch_by_id('11').set_color(overlap_color)
+        v.get_patch_by_id('11').set_alpha(0.6)
+        if edge_color:
+            v.get_patch_by_id('11').set_edgecolor(edge_color)
+            v.get_patch_by_id('11').set_linewidth(edge_width)
+
+    # Customize text labels
+    # If custom text is provided, replace the default numbers
+    if text1 is not None and v.get_label_by_id('10'):
+        v.get_label_by_id('10').set_text(text1)
+
+    if text2 is not None and v.get_label_by_id('01'):
+        v.get_label_by_id('01').set_text(text2)
+
+    if text_overlap is not None and v.get_label_by_id('11'):
+        v.get_label_by_id('11').set_text(text_overlap)
+
+    # Set font size for all labels
+    if v.get_label_by_id('10'):
+        v.get_label_by_id('10').set_fontsize(font_size)
+
+    if v.get_label_by_id('01'):
+        v.get_label_by_id('01').set_fontsize(font_size)
+
+    if v.get_label_by_id('11'):
+        v.get_label_by_id('11').set_fontsize(font_size)
+
+    # Move text outside if requested
+    # Get current positions and adjust them
+    if v.get_label_by_id('10'):
+        pos = v.get_label_by_id('10').get_position()
+        # Move left circle text further left
+        v.get_label_by_id('10').set_position((pos[0] - text_shift_left, pos[1]))
+
+    if v.get_label_by_id('01'):
+        pos = v.get_label_by_id('01').get_position()
+        # Move right circle text further right
+        v.get_label_by_id('01').set_position((pos[0] + text_shift_right, pos[1]))
+
+    # if v.get_label_by_id('11'):
+    #     pos = v.get_label_by_id('11').get_position()
+    #     # Move overlap text down
+    #     v.get_label_by_id('11').set_position((pos[0], pos[1] - 0.3))
+
+    plt.title(title)
+    if save_path:
+        save_full_name = os.path.join(save_path, f"{fig_name}.png")
+        plt.savefig(save_full_name, bbox_inches='tight')
+
     plt.show()
 
-    # venn3((first_group_sig_coeffs, second_group_sig_coeffs, all_coeffs), (first_group_name, second_group_name, "all_coeffs"))
-    # plt.title("Distinct Statistically Significant Coefficients for each group"
-    #           + (f"\nModel: {model_info['model_short_name']} (α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
-    #           + (f"\nfilter={query}" if query else ""))
-    # plt.show()
 
-    print("done!")
+def create_venn_from_totals(total_group1, total_group2, overlap,
+                            label1="Group A", label2="Group B",
+                            title="Venn Diagram",
+                            color1="red", color2="blue", overlap_color="purple",
+                            text1=None, text2=None, text_overlap=None,
+                            font_size=14,
+                            text_outside=False,
+                            edge_color="darkgrey",
+                            edge_width=1.0):
+    """
+    Create a 2-circle Venn diagram from total group sizes with custom colors and text.
+
+    Parameters:
+    -----------
+    total_group1 : int
+        Total number of elements in group 1
+    total_group2 : int
+        Total number of elements in group 2
+    overlap : int
+        Number of elements in both groups
+    label1 : str
+        Label for the first circle
+    label2 : str
+        Label for the second circle
+    title : str
+        Title for the diagram
+    color1 : str
+        Color for the first circle (group 1 only area)
+    color2 : str
+        Color for the second circle (group 2 only area)
+    overlap_color : str
+        Color for the overlap area (both groups)
+    text1 : str or None
+        Custom text for group 1 only area. If None, shows the number. Use "" to hide.
+    text2 : str or None
+        Custom text for group 2 only area. If None, shows the number. Use "" to hide.
+    text_overlap : str or None
+        Custom text for overlap area. If None, shows the number. Use "" to hide.
+    font_size : int or float
+        Font size for the text in the circles (default: 14)
+    text_outside : bool
+        If True, position text labels outside the circles (default: False)
+    edge_color : str or None
+        Color for the circle outlines. Use None for no outline (default: "darkgrey")
+    edge_width : float
+        Width of the circle outlines in points (default: 1.0)
+    """
+    group1_only = total_group1 - overlap
+    group2_only = total_group2 - overlap
+
+    create_venn_diagram(group1_only, overlap, group2_only, label1, label2, title,
+                        color1, color2, overlap_color, text1, text2, text_overlap,
+                        font_size, text_outside, edge_color, edge_width, save_path)
+
 
 def amount_distinct_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
                            x="rounded_encoding", hue=None, kfolds_threshold=10, query=""):
@@ -1028,7 +1009,7 @@ def calc_freq_within_chosen_for_axis_value(exploded_df, non_zero_df, coeff_type,
     return pivot_counts, col_names, axis_names, coeff_name_col, score_text
 
 
-def plot_prop_scatter_plot_and_hist(df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col):
+def plot_prop_scatter_plot_and_hist(df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col, save_path):
     # Create subplot with 2 rows, different heights
     fig = make_subplots(
         rows=2, cols=1,
@@ -1132,14 +1113,28 @@ def plot_prop_scatter_plot_and_hist(df, calc_name, col_names, axis_names, coeff_
     if SHOW_FIGS:
         fig.show()
 
-def calc_and_plot_prop(calc_name, exploded_df, non_zero_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_freq_for_axis_value):
-    # Group by both actual_chosen_coeffs and brain_area, then count occurrences
-    score_df, col_names, axis_names, coeff_name_col, score_text = axis_func(exploded_df, non_zero_df, coeff_type, model_info["model_short_name"], col_to_compare, group1, group2)
+def calc_and_plot_single_scatter(calc_name, exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_freq_for_axis_value):
+    data_dict_path = f"{save_path}/for_{calc_name}_scatter_data_dict.pkl"
+
+    # if file in data_dict_path exist:
+    if os.path.exists(data_dict_path):
+        print(f"Loading {calc_name} data from {data_dict_path}")
+        with open(data_dict_path, "rb") as f:
+            res_dict = pickle.load(f)
+        # Unpack resdict
+        score_df, col_names, axis_names, coeff_name_col, score_text = res_dict["score_df"], res_dict["col_names"], res_dict["axis_names"], res_dict["coeff_name_col"], res_dict["score_text"]
+
+    else:
+        score_df, col_names, axis_names, coeff_name_col, score_text = axis_func(exploded_df, coeff_df, coeff_type, model_info["model_short_name"], col_to_compare, group1, group2, save_path)
+        res_dict = {"score_df": score_df, "col_names": col_names, "axis_names": axis_names, "coeff_name_col": coeff_name_col, "score_text": score_text}
+        with open(data_dict_path, "wb") as f:
+            pickle.dump(res_dict, f)
+
     score_df['score'] = pd.to_numeric(score_df['score'])
     score_df.to_pickle(f"/scratch/gpfs/HASSON/tk6637/princeton/temp_data/paper/violin_plot/{coeff_type}_{model_info['model_short_name']}_{col_to_compare}_{calc_name}_.pkl")
 
     # plot_score_contour()
-    plot_prop_scatter_plot_and_hist(score_df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col)
+    plot_prop_scatter_plot_and_hist(score_df, calc_name, col_names, axis_names, coeff_type, model_info, score_text, coeff_name_col, save_path)
 
     group_com_text = f"{col_names[0]}>{col_names[1]}"
     score_df[group_com_text] = score_df[col_names[0]] > score_df[col_names[1]]
@@ -1198,11 +1193,11 @@ def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeff
     for i in tqdm(range(n_permutations), desc="Jaccard permutation test"):
         shuffled_labels = np.random.permutation(labels)
         label_map = dict(zip(units, shuffled_labels))
-        perm_df = coeff_df.copy()
-        perm_df[col_to_compare] = perm_df[unit_col].map(label_map)
-        perm_exploded = perm_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
-        g1 = set(perm_exploded.query(f"{col_to_compare} == '{first_group_name}'")["actual_chosen_coeffs"])
-        g2 = set(perm_exploded.query(f"{col_to_compare} == '{second_group_name}'")["actual_chosen_coeffs"])
+        perm_exploded = exploded[unit_col].map(label_map)
+
+        g1 = set(exploded.loc[perm_exploded == first_group_name, "actual_chosen_coeffs"])
+        g2 = set(exploded.loc[perm_exploded == second_group_name, "actual_chosen_coeffs"])
+
         perm_union = g1 | g2
         null_J[i] = len(g1 & g2) / len(perm_union)
 
@@ -1241,6 +1236,10 @@ def run_group_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs,
     # only_in_first = first_group_all_coeffs - second_group_all_coeffs
     # only_in_second = second_group_all_coeffs - first_group_all_coeffs
     unique_for_single_group = first_group_all_coeffs ^ second_group_all_coeffs
+    if len(unique_for_single_group) == 0:
+        print("No unique for single group")
+        return first_group_all_coeffs, second_group_all_coeffs, None
+
     coeff_df_cp = coeff_df.copy()
 
     results = {}
@@ -2296,6 +2295,7 @@ if __name__ == '__main__':
     parser.add_argument("--query", type=str, default="")
     parser.add_argument("--col-to-compare", nargs='+',  default=["brain_area"], choices=["brain_area", "rounded_encoding", "time_bin", "time_bin_and_brain_area"], help="One or more columns to compare")
     parser.add_argument("--run-venn", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--run-scatter", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-pca", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-sim", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-violin", action=argparse.BooleanOptionalAction, default=False)
@@ -2304,6 +2304,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     run_venn = args.run_venn
+    run_scatter = args.run_scatter
     run_pca = args.run_pca
     run_sim = args.run_sim
     run_violin = args.run_violin
@@ -2331,10 +2332,15 @@ if __name__ == '__main__':
     sig_test = "Mann-Whitney"#"t-test_welch"
     # violin_annot = True
 
-    top = 10
+
+    save_dir = "../results/figures/overlapping_coeffs/"
 
     for df_type in df_types:
         for col_to_compare in cols_to_compare:
+            save_ending = f"sid-{sid}_dftype-{df_type}_colcompare-{col_to_compare}_filter-{filter_type}_model-{model_name}_layer-{models_info[model_name]['layer']}_context--{models_info[model_name]['context']}_embedmod-{emb_mod}_kfoldsthresh-{kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{num_alphas}{f'_{emb_mod}' if emb_mod else ''}"
+            save_path = os.path.join(save_dir, save_ending)
+            os.makedirs(save_path, exist_ok=True)
+
             print("\n\n")
             print("*"*50)
             print(f"Generating plot for {df_type} and {col_to_compare}")
@@ -2372,6 +2378,10 @@ if __name__ == '__main__':
             if run_venn:
                 coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
                             col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type)
+                            col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type, save_path=save_path)
+            if run_scatter:
+                coeff_scatter(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare,
+                              group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type, save_path=save_path)
 
             # coeffs_values(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type,  top=top)
 
