@@ -495,7 +495,7 @@ def plot_args_summary(args, pdf):
             ax.text(x_pos, y_pos, text_line, transform=ax.transAxes,
                     fontsize=9, ha='left', fontfamily='monospace')
             y_pos -= line_height
-
+    os.makedirs(os.path.dirname(args.outfile), exist_ok=True)
     pdf.savefig(fig)
     plt.close()
     return pdf

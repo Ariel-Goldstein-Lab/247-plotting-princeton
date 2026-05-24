@@ -1,3 +1,5 @@
+import os
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -194,7 +196,7 @@ def plot_x_vs_num_of_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, 
     :param kfolds_threshold:
     :return:
     """
-    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
+    kfolds_df, _ = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
 
     _plot_x_vs_num_coeffs(kfolds_df, max_alpha, min_alpha, model_info, num_alphas, x=x, hue=hue, filter_name=query,
                           kfolds_threshold=kfolds_threshold, sig_test=sig_test) #, violin_annot=violin_annot
@@ -733,25 +735,22 @@ def amount_distinct_coeffs(sid, filter_type, model_info, min_alpha, max_alpha, n
     plt.tight_layout(rect=[0, 0, 1, 0.96])  # Adjust layout leaving space for suptitle
     plt.show()
 
-def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold: int, max_alpha,
-                                min_alpha, mode, model_info, num_alphas, emb_mod, query: str, sid, coeff_type="lasso&corr"):
-    query = get_group_query(col_to_compare, group1, group2, query)
+def get_group_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold: int, max_alpha,
+                                min_alpha, mode, model_info, num_alphas, emb_mod, query: str, sid, coeff_type="lasso"):
+    combined_query = get_group_query(col_to_compare, group1, group2, query)
+    coeff_df, exploded_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas,
+                                          kfolds_threshold, coeff_type, emb_mod=emb_mod, query=combined_query,
+                                          return_exploded=True)
+    return coeff_df, exploded_df
 
-    if coeff_type == "lasso&corr" or coeff_type == "corr&lasso":
-        exploded_df, _ = _get_exploded_united_lasso_and_corr(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
-                                                             kfolds_threshold, emb_mod=emb_mod, query=query)
-    else:
-        coeff_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-                                        num_alphas, sid, emb_mod=emb_mod, query=query, df_type=coeff_type)
-        exploded_df = coeff_df.query("num_of_chosen_coeffs > 0").explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
-
-        # important_args = {"model_info": model_info, "emb_mod": emb_mod, "query": query, "coeff_type": coeff_type, "filter_type": filter_type}
-        calc_and_plot_prop("frequency", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_freq_for_axis_value)
-        # calc_and_plot_prop("frequency within chosen", exploded_df, coeff_df, coeff_type, model_info, axis_func=calc_freq_within_chosen_for_axis_value)
-        # calc_and_plot_prop("abs_mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_abs_mean_for_axis_value)
-        # calc_and_plot_prop("abs_mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_abs_mean_for_axis_value)
-        # calc_and_plot_prop("mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, axis_func=calc_mean_for_axis_value)
-        exploded_df.rename(columns={"chosen_coeffs_val": f"chosen_coeffs_val_{coeff_type}",}, inplace=True)
+def _get_groups_distinct_coeffs(col_to_compare, group1, group2, exploded_df, coeff_df, coeff_type="lasso", run_permutation_test=True):
+    # # important_args = {"model_info": model_info, "emb_mod": emb_mod, "query": query, "coeff_type": coeff_type, "filter_type": filter_type}
+    # calc_and_plot_scatter("frequency", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_freq_for_axis_value)
+    # # calc_and_plot_prop("frequency within chosen", exploded_df, coeff_df, coeff_type, model_info, axis_func=calc_freq_within_chosen_for_axis_value)
+    # # calc_and_plot_prop("abs_mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_abs_mean_for_axis_value_old)
+    # calc_and_plot_scatter("abs_mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_abs_mean_for_axis_value)
+    # # calc_and_plot_prop("mean", exploded_df, coeff_df, coeff_type, model_info, col_to_compare, group1, group2, save_path, axis_func=calc_mean_for_axis_value)
+    exploded_df.rename(columns={"chosen_coeffs_val": f"chosen_coeffs_val_{coeff_type}",}, inplace=True)
 
     first_group_name, second_group_name = sorted([group1, group2])
 
@@ -760,11 +759,10 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
     second_group_all_coeffs = set(
         exploded_df.query(f"{col_to_compare} == '{second_group_name}'")["actual_chosen_coeffs"].to_list())
 
-    if coeff_type == "corr" or coeff_type == "ridge": # Only done on corr/ridge because they have a continues value while lasso is either chosen or not
+    np.random.seed(42)
+    if (coeff_type == "corr" or coeff_type == "ridge") and run_permutation_test: # Only done on corr/ridge because they have a continues value while lasso is either chosen or not
         first_group_all_coeffs, second_group_all_coeffs, _= run_group_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name,
-                                                                                        second_group_name, n_permutations=5000)
-    run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs,
-                                 first_group_name, second_group_name, model_info, n_permutations=5000)
+                                                                                        second_group_name, n_permutations=10000)
 
     exploded_df[f"is_in_{first_group_name}"] = exploded_df["actual_chosen_coeffs"].isin(first_group_all_coeffs)
     exploded_df[f"is_in_{second_group_name}"] = exploded_df["actual_chosen_coeffs"].isin(second_group_all_coeffs)
@@ -776,7 +774,7 @@ def _get_groups_distinct_coeffs(col_to_compare, filter_type, group1, group2, kfo
                                                         )
     # assert exploded_df['group'].notna().all(), "Found None/NaN values in 'group' column" # turned off because it is None when it was removed from the groups in the permutation test
 
-    return exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name
+    return first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name, exploded_df
 
 def calc_abs_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, col_to_compare, group1, group2):
     del exploded_df
@@ -970,7 +968,7 @@ def calc_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, c
 
     return result_df, col_names, axis_names, coeff_name_col, score_text
 
-def calc_freq_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, col_to_compare, group1, group2):
+def calc_freq_for_axis_value(exploded_df, coeff_df, coeff_type, model_name, col_to_compare, group1, group2, save_path):
     score_text = r'$\frac{|x - y|}{x + y + \epsilon}$' #\sqrt{2} \cdot
 
     counts = exploded_df.groupby(['actual_chosen_coeffs', col_to_compare]).size().reset_index(name='count') # long df with columns - 'actual_chosen_coeffs', 'brain_area'/'time_bin' etc., 'count'
@@ -983,7 +981,7 @@ def calc_freq_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, c
     pivot_counts = pivot_counts.reset_index()
     pivot_counts.columns.name = None
 
-    result = non_zero_df.groupby(col_to_compare)[["full_elec_name"]].nunique() # Used for normalizing - counts how many unique electrodes per brain area/time_bin
+    result = coeff_df.groupby(col_to_compare)[["full_elec_name"]].nunique() # Used for normalizing - counts how many unique electrodes per brain area/time_bin
 
     pivot_counts[group1] = pivot_counts[group1] / (result.loc[group1, "full_elec_name"] * 161)
     pivot_counts[group2] = pivot_counts[group2] / (result.loc[group2, "full_elec_name"] * 161)
@@ -1124,8 +1122,9 @@ def plot_prop_scatter_plot_and_hist(df, calc_name, col_names, axis_names, coeff_
         showarrow=False,
         font=dict(size=18)
     )
-    save_prefix = f'/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/maybe_paper/scatter_plots/type_{coeff_type}/for_{calc_name}/by_{col_to_compare}/model_{model_info["model_short_name"]}_scatterplot'
-    Path(save_prefix).parent.mkdir(parents=True, exist_ok=True)
+    # save_prefix = f'/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/maybe_paper/scatter_plots/type_{coeff_type}/for_{calc_name}/by_{col_to_compare}/model_{model_info["model_short_name"]}_scatterplot'
+    # Path(save_prefix).parent.mkdir(parents=True, exist_ok=True)
+    save_prefix = f"{save_path}/for_{calc_name}_scatterplot"
     fig.write_html(save_prefix+'.html')
     fig.write_image(save_prefix+'.pdf')
     fig.write_image(save_prefix+'.png')
@@ -1152,7 +1151,7 @@ def calc_and_plot_prop(calc_name, exploded_df, non_zero_df, coeff_type, model_in
     print("\nWhere they are equal")
     print(score_df.sort_values(by="score", ascending=True)[:10])
 
-def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name, second_group_name, model_info, n_permutations=5000):
+def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs, first_group_name, second_group_name, model_info, coeff_type, n_permutations=5000):
     """
     Pipeline-level permutation test for the Jaccard index J = |A ∩ B| / |A ∪ B|.
 
@@ -1179,6 +1178,14 @@ def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeff
     else:
         raise ValueError(f"Unsupported col_to_compare: {col_to_compare}. Add a unit_col mapping for it.")
 
+    exploded = (
+        coeff_df
+        .query("num_of_chosen_coeffs > 0")
+        .explode(["actual_chosen_coeffs", "chosen_coeffs_val"])
+        [[unit_col, col_to_compare, "actual_chosen_coeffs"]]  # drop unused cols
+        .copy()
+    )
+
     unit_labels = (
         coeff_df[[unit_col, col_to_compare]]
         .drop_duplicates()
@@ -1204,7 +1211,7 @@ def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeff
     p_value = np.mean(null_J <= observed_J)
 
     print(f"Null J: mean = {null_J.mean():.4f}, std = {null_J.std():.4f}")
-    print(f"P-value (two-tailed): {p_value:.4f}")
+    print(f"P-value (one-tailed): {p_value:.4f}")
 
     # Plot
     plt.figure(figsize=(10, 6))
@@ -1217,7 +1224,7 @@ def run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeff
     plt.ylabel('Frequency')
     plt.title(
         f'Pipeline permutation test: null J distribution\n'
-        f'{first_group_name} vs {second_group_name} | {model_info["model_short_name"]} | '
+        f'{first_group_name} vs {second_group_name} | {model_info["model_short_name"]} | {coeff_type} | '
         f'p = {p_value:.4f} (n={n_permutations})'
     )
     plt.legend()
@@ -1365,9 +1372,8 @@ def coeffs_values(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas
                       query="", kfolds_threshold=10, df_type="lasso&corr", top=5):
     print("straring coeffs_values")
 
-    exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
-        col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-        num_alphas, query, sid, coeff_type=df_type)
+    coeff_df, exploded_df = get_group_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, emb_mod, query, sid, coeff_type=df_type)
+    first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name, _ = _get_groups_distinct_coeffs(col_to_compare, group1, group2, exploded_df, coeff_df, coeff_type=df_type)
 
     # Only keep necessary columns in exploded_df to reduce memory
     chosen_coeffs_val_cols = [col for col in exploded_df.columns if col.startswith("chosen_coeffs_val")]
@@ -1419,157 +1425,11 @@ def coeffs_values(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas
     print(top_coeffs_df)
     return top_coeffs_df
 
-
-# def coeffs_statistics(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, col_to_compare, group1, group2,
-#                       query="", kfolds_threshold=10, df_type="lasso&corr"):
-#     # TODO: written very non efficient, fix!
-#     non_zero_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-#                                     num_alphas, sid, query=query, df_type=df_type)
-#     exploded_non_zero_df = non_zero_df.query("num_of_chosen_coeffs > 0").explode("actual_chosen_coeffs").rename(columns={'actual_chosen_coeffs': 'coeff_indx'}).reset_index(drop=True)
-#
-#     all_coeffs_df = prepare_kfolds_coeffs_df(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, query=query).rename(columns={'coeffs': 'coeffs_mean_value'})
-#     # all_coeffs_df['coeff_indx'] = all_coeffs_df['coeffs_mean_value'].apply(lambda x: list(range(len(x))))
-#     all_coeffs_df['coeff_indx'] = all_coeffs_df['coeffs_mean_value'].apply(lambda x: [str(i) for i in range(len(x))])
-#     exploded_all_coeffs_df = all_coeffs_df.explode(['coeff_indx', 'coeffs_mean_value']).reset_index(drop=True)
-#
-#     coeffs = exploded_non_zero_df.merge(exploded_all_coeffs_df, how='left')
-#
-#     exploded_df, first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name = _get_groups_distinct_coeffs(
-#         col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info,
-#         num_alphas, query, sid, df_type=df_type)
-#     coeffs[f"is_in_{first_group_name}"] = coeffs["coeff_indx"].isin(first_group_all_coeffs)
-#     coeffs[f"is_in_{second_group_name}"] = coeffs["coeff_indx"].isin(second_group_all_coeffs)
-#
-#     MEAN_COLORS = ('240', '98', '146')  # Light pink (similar to CORR_COLORS in example)
-#     COUNT_COLORS = ('100', '181', '246')  # Light blue (similar to COEFF_COLORS in example)
-#
-#     MEAN_AXIS_COLOR = f"rgb({MEAN_COLORS[0]}, {MEAN_COLORS[1]}, {MEAN_COLORS[2]})"
-#     COUNT_AXIS_COLOR = f"rgb({COUNT_COLORS[0]}, {COUNT_COLORS[1]}, {COUNT_COLORS[2]})"
-#
-#
-#     def apply_filter(df, first_group_name, second_group_name, filter_type):
-#         first_col = f"is_in_{first_group_name}"
-#         second_col = f"is_in_{second_group_name}"
-#
-#         if filter_type == f"Only_in_{first_group_name}":
-#             return df[df[first_col] & (~df[second_col])]
-#         elif filter_type == f"Only_in_{second_group_name}":
-#             return df[(~df[first_col]) & df[second_col]]
-#         elif filter_type == "In_both":
-#             return df[df[first_col] & df[second_col]]
-#         else:
-#             raise ValueError(f"Unknown filter type: {filter_type}")
-#
-#     group_types = [
-#         f"Only_in_{first_group_name}",
-#         f"Only_in_{second_group_name}",
-#         "In_both"
-#     ]
-#
-#     # Create subplots with specs for secondary y-axis
-#     fig = make_subplots(
-#         rows=2,
-#         cols=3,
-#         shared_xaxes=True,
-#         vertical_spacing=0.15,
-#         subplot_titles=[f"{group_type} - Mean Values and SD" for group_type in group_types]+ [f"{group_type} - Count by Index" for group_type in group_types],
-#         row_heights=[0.7, 0.3]
-#     )
-#
-#     all_strongest_coeffs = []
-#     for group_idx, group_type in enumerate(group_types):
-#         curr_coeffs = apply_filter(coeffs, first_group_name, second_group_name, group_type)
-#
-#         # Calculate statistics
-#         stats = curr_coeffs.groupby('coeff_indx').agg(
-#             mean_value=('coeffs_mean_value', 'mean'),
-#             std_value=('coeffs_mean_value', 'std'),
-#             count=('coeffs_mean_value', 'count')
-#         ).reset_index()
-#         stats['abs_mean_value'] = stats['mean_value'].abs()
-#
-#         # Sort by ID (or you can sort by another criterion)
-#         # stats = stats.sort_values('coeff_indx')
-#         stats = stats.sort_values('mean_value', ascending=False)
-#         stats = stats.sort_values('count', ascending=False)
-#
-#         # Add standard deviation area
-#         fig.add_trace(
-#             go.Bar(
-#                 x=stats['coeff_indx'],
-#                 y=stats['mean_value'],
-#                 error_y=dict(
-#                     type='data',
-#                     array=stats['std_value'],
-#                     visible=True,
-#                     thickness=0.5,  # Makes the error bar line thinner (default is 2)
-#                     width=2, # Controls the width of the horizontal caps (default is 6)
-#                 ),
-#                 name="Mean ± SD",
-#                 marker_color=MEAN_AXIS_COLOR,
-#                 showlegend=True if group_idx == 0 else False,
-#             ),
-#             row=1, col=group_idx+1
-#         )
-#
-#         # Add count bar chart
-#         fig.add_trace(
-#             go.Bar(
-#                 x=stats['coeff_indx'],
-#                 y=stats['count'],
-#                 name="Count",
-#                 marker_color=COUNT_AXIS_COLOR,
-#                 showlegend=True if group_idx == 0 else False,
-#             ),
-#             row=2, col=group_idx+1
-#         )
-#
-#         # # Add horizontal line at y=0 for mean values
-#         # fig.add_shape(
-#         #     type='line',
-#         #     x0=stats['coeff_indx'].iloc[0],
-#         #     x1=stats['coeff_indx'].iloc[-1],
-#         #     y0=0, y1=0,
-#         #     line=dict(color='black', width=1),
-#         #     row=1, col=group+1
-#         # )
-#
-#         # Display the top 10 as a formatted list
-#         print(f"\n********** {group_type} **********")
-#
-#         top_5_mean = stats.sort_values('abs_mean_value', ascending=False).head(5)
-#         print("Top 5 Indexes by Mean Value:")
-#         for i, (_, row) in enumerate(top_5_mean.iterrows(), 1):
-#             print(f"{i}. Index: {row['coeff_indx']} - Mean Value: {row['mean_value']:.3f} (Count: {row['count']})")
-#         print()
-#
-#         top_5_count = stats.sort_values('count', ascending=False).head(5)
-#         # Display the top 5 as a formatted list
-#         print("Top 5 Indexes by Count:")
-#         for i, (_, row) in enumerate(top_5_count.iterrows(), 1):
-#             print(f"{i}. Index: {row['coeff_indx']} - Mean Value: {row['mean_value']:.3f} (Count: {row['count']})")
-#
-#         strongest_coeffs = set(top_5_mean + top_5_count)
-#         all_strongest_coeffs.append(strongest_coeffs)
-#
-#     fig.update_yaxes(title_text="Value", row=1, col=1)
-#     fig.update_yaxes(title_text="Count", row=2, col=1)
-#     # Update layout
-#     fig.update_layout(
-#         height=700,
-#         width=1200,
-#         showlegend=True,
-#         template='plotly_white',
-#         title_text="Statistics by coeff indx",
-#     )
-#     fig.show()
-#     a=0
-
 def plot_encoding_num_coeffs_scatterplot_all_data(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
                                                   x="rounded_encoding", kfolds_threshold=10, query="", df_type="lasso&corr"):
 
 
-    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
+    kfolds_df, _ = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
 
     # Create the scatter plot
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -1696,7 +1556,7 @@ def plot_score_contour():
 
 def plot_encoding_num_coeffs_scatterplot(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, category_by="brain_area", kfolds_threshold=10, query="",
                                          df_type="lasso&corr"):
-    kfolds_df = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
+    kfolds_df, _ = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query=query)
 
 
     # Statistical test:

@@ -45,7 +45,7 @@ def load_electrode_dfs_by_type(lines_to_plot, patient, filter_type, model_info, 
                                amount_of_alphas, mode, reliable_kfolds_threshold, emb_mod, query):
     dfs = {}
     for line_type in lines_to_plot:
-        df = get_coeffs_df(patient, mode, model_info, filter_type, min_alpha, max_alpha, amount_of_alphas, reliable_kfolds_threshold, line_type, emb_mod, query=query)
+        df, _ = get_coeffs_df(patient, mode, model_info, filter_type, min_alpha, max_alpha, amount_of_alphas, reliable_kfolds_threshold, line_type, emb_mod, query=query)
         dfs[line_type] = df
     return dfs
 
