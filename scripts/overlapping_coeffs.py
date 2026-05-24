@@ -757,41 +757,30 @@ def _get_groups_distinct_coeffs(col_to_compare, group1, group2, exploded_df, coe
 
     return first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name, exploded_df
 
-def calc_abs_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, col_to_compare, group1, group2):
+def calc_abs_mean_for_axis_value(exploded_df, coeff_df, coeff_type, model_name, col_to_compare, group1, group2, save_path):
     del exploded_df
-    gc.collect()
 
-    all_exp = non_zero_df.explode(["all_coeffs_index", "all_coeffs_val"])
+    all_exploded = coeff_df.explode(["all_coeffs_index", "all_coeffs_val"])
 
-    del non_zero_df
-    gc.collect()
+    del coeff_df
 
-    # The direction doesn't matter, just the magnitude, so take absolute values
-    all_exp["all_coeffs_val"] = all_exp["all_coeffs_val"].abs()
+    all_exploded["all_coeffs_val"] = all_exploded["all_coeffs_val"].abs()
 
-    stats_df = all_exp.groupby(['all_coeffs_index', col_to_compare])['all_coeffs_val'].agg(
+    stat_df = all_exploded.groupby(["all_coeffs_index", col_to_compare])['all_coeffs_val'].agg(
         mean='mean',
         se=stats.sem
     ).reset_index()
 
-    del all_exp
+    del all_exploded
     gc.collect()
 
-    save_prefix = f'/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/maybe_paper/scatter_plots/type_{coeff_type}/for_mean/by_{col_to_compare}/model_{model_name}_stats'
-    Path(save_prefix).parent.mkdir(parents=True, exist_ok=True)
-    stats_df.to_csv(save_prefix+".csv", index=False)
-    stats_df.to_pickle(save_prefix+".pkl")
-
-    print(f"Abs Mean stats saved to {save_prefix}")
-
-    # Pivot to get brain areas as columns for mean
-    pivot_mean = stats_df.pivot(index='all_coeffs_index',
+    pivot_mean = stat_df.pivot(index='all_coeffs_index',
                                 columns=col_to_compare,
                                 values='mean')  # .fillna(0)
     pivot_mean = pivot_mean.reset_index()
 
     # Pivot to get brain areas as columns for SE
-    pivot_se = stats_df.pivot(index='all_coeffs_index',
+    pivot_se = stat_df.pivot(index='all_coeffs_index',
                               columns=col_to_compare,
                               values='se')#.fillna(0)
     pivot_se = pivot_se.reset_index()
@@ -804,13 +793,9 @@ def calc_abs_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_nam
     result_df = pivot_mean.merge(pivot_se[['all_coeffs_index', f'{group1}_se', f'{group2}_se']],
                                  on='all_coeffs_index')
 
-    epsilon = 1e-9
-    # if coeff_type == "corr":
-    #     score_text = r'$\frac{||x| - |y||}{|x| + |y| + \epsilon}$'
-    #     result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
-    #             result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)
-    # else:
+
     score_text = r'$\frac{||x| - |y||}{|x| + |y| + \epsilon}$'
+    epsilon = 1e-9
     result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
             result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)  # np.sqrt(2) *
 
@@ -819,133 +804,7 @@ def calc_abs_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_nam
     axis_names = [f'{group1} Abs Mean', f'{group2} Abs Mean']
     coeff_name_col = "all_coeffs_index"
 
-    return result_df, col_names, axis_names, coeff_name_col, score_text
-
-
-def calc_abs_mean_for_chosen_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, col_to_compare, group1, group2):
-    del exploded_df
-    gc.collect()
-
-    all_exp = non_zero_df.explode(["all_coeffs_index", "all_coeffs_val"])
-
-    del non_zero_df
-    gc.collect()
-
-    # The direction doesn't matter, just the magnitude, so take absolute values
-    all_exp["all_coeffs_val"] = all_exp["all_coeffs_val"].abs()
-
-    stats_df = all_exp.groupby(['all_coeffs_index', col_to_compare])['all_coeffs_val'].agg(
-        mean='mean',
-        se=stats.sem
-    ).reset_index()
-
-    del all_exp
-    gc.collect()
-
-    save_prefix = f'/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/maybe_paper/scatter_plots/type_{coeff_type}/for_mean/by_{col_to_compare}/model_{model_name}_stats'
-    Path(save_prefix).parent.mkdir(parents=True, exist_ok=True)
-    stats_df.to_csv(save_prefix+".csv", index=False)
-    stats_df.to_pickle(save_prefix+".pkl")
-
-    print(f"Abs Mean stats saved to {save_prefix}")
-
-    # Pivot to get brain areas as columns for mean
-    pivot_mean = stats_df.pivot(index='all_coeffs_index',
-                                columns=col_to_compare,
-                                values='mean')  # .fillna(0)
-    pivot_mean = pivot_mean.reset_index()
-
-    # Pivot to get brain areas as columns for SE
-    pivot_se = stats_df.pivot(index='all_coeffs_index',
-                              columns=col_to_compare,
-                              values='se')#.fillna(0)
-    pivot_se = pivot_se.reset_index()
-
-    # Rename columns to distinguish mean and SE
-    pivot_mean = pivot_mean.rename(columns={group1: f'{group1}_mean', group2: f'{group2}_mean'})
-    pivot_se = pivot_se.rename(columns={group1: f'{group1}_se', group2: f'{group2}_se'})
-
-    # Merge mean and SE DataFrames
-    result_df = pivot_mean.merge(pivot_se[['all_coeffs_index', f'{group1}_se', f'{group2}_se']],
-                                 on='all_coeffs_index')
-
-    epsilon = 1e-9
-    # if coeff_type == "corr":
-    #     score_text = r'$\frac{||x| - |y||}{|x| + |y| + \epsilon}$'
-    #     result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
-    #             result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)
-    # else:
-    score_text = r'$\frac{||x| - |y||}{|x| + |y| + \epsilon}$'
-    result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
-            result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)  # np.sqrt(2) *
-
-    # Get axis names
-    col_names = [f'{group1}_mean', f'{group2}_mean']
-    axis_names = [f'{group1} Abs Mean', f'{group2} Abs Mean']
-    coeff_name_col = "all_coeffs_index"
-
-    return result_df, col_names, axis_names, coeff_name_col, score_text
-
-def calc_mean_for_axis_value(exploded_df, non_zero_df, coeff_type, model_name, col_to_compare, group1, group2):
-    del exploded_df
-    gc.collect()
-
-    all_exp = non_zero_df.explode(["all_coeffs_index", "all_coeffs_val"])
-
-    del non_zero_df
-    gc.collect()
-
-    stats_df = all_exp.groupby(['all_coeffs_index', col_to_compare])['all_coeffs_val'].agg(
-        mean='mean',
-        se=stats.sem
-    ).reset_index()
-
-    del all_exp
-    gc.collect()
-
-    save_prefix = f'/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/results/maybe_paper/scatter_plots/type_{coeff_type}/for_mean/by_{col_to_compare}/model_{model_name}_stats'
-    Path(save_prefix).parent.mkdir(parents=True, exist_ok=True)
-    stats_df.to_csv(save_prefix+".csv", index=False)
-    stats_df.to_pickle(save_prefix+".pkl")
-
-    print(f"Mean stats saved to {save_prefix}")
-
-    # Pivot to get brain areas as columns for mean
-    pivot_mean = stats_df.pivot(index='all_coeffs_index',
-                                columns=col_to_compare,
-                                values='mean')  # .fillna(0)
-    pivot_mean = pivot_mean.reset_index()
-
-    # Pivot to get brain areas as columns for SE
-    pivot_se = stats_df.pivot(index='all_coeffs_index',
-                              columns=col_to_compare,
-                              values='se')#.fillna(0)
-    pivot_se = pivot_se.reset_index()
-
-    # Rename columns to distinguish mean and SE
-    pivot_mean = pivot_mean.rename(columns={group1: f'{group1}_mean', group2: f'{group2}_mean'})
-    pivot_se = pivot_se.rename(columns={group1: f'{group1}_se', group2: f'{group2}_se'})
-
-    # Merge mean and SE DataFrames
-    result_df = pivot_mean.merge(pivot_se[['all_coeffs_index', f'{group1}_se', f'{group2}_se']],
-                                 on='all_coeffs_index')
-
-    epsilon = 1e-9
-    # if coeff_type == "corr":
-    #     score_text = r'$\frac{||x| - |y||}{|x| + |y| + \epsilon}$'
-    #     result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
-    #             result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)
-    # else:
-    score_text = r'$\frac{|x - y|}{x + y + \epsilon}$'
-    # result_df["score"] = np.abs(result_df[f'{group2}_mean'] - result_df[f'{group1}_mean']) / (
-    #         result_df[f'{group2}_mean'] + result_df[f'{group1}_mean'] + epsilon)  # np.sqrt(2) *
-
-    result_df["score"] = 1
-
-    # Get axis names
-    col_names = [f'{group1}_mean', f'{group2}_mean']
-    axis_names = [f'{group1} Mean', f'{group2} Mean']
-    coeff_name_col = "all_coeffs_index"
+    print('Done with: calc_abs_mean_for_axis_value')
 
     return result_df, col_names, axis_names, coeff_name_col, score_text
 
@@ -2377,7 +2236,6 @@ if __name__ == '__main__':
             #                       col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, query=query)
             if run_venn:
                 coeffs_venn(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
-                            col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type)
                             col_to_compare=col_to_compare, group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type, save_path=save_path)
             if run_scatter:
                 coeff_scatter(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare,
