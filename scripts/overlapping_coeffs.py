@@ -429,6 +429,36 @@ def customize_time_xaxis(ax, x, n=20):
     tick_positions = ax.get_xticks()
     ax.axvline(x=tick_positions[80], color='black', linewidth=0.5, alpha=0.7)
 
+def jaccard_controls(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
+                    col_to_compare, group1, group2, kfolds_threshold=10, emb_mod=None, query="", df_type="lasso&corr",
+                    text_shift_left=0.2, text_shift_right=0.2, ending_first_control="-first_half", ending_second_control="-second_half"):
+    # Permutation test
+    coeff_df, exploded_df = get_group_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha, min_alpha, mode, model_info, num_alphas, emb_mod, query, sid, coeff_type=df_type)
+    first_group_all_coeffs, first_group_name, second_group_all_coeffs, second_group_name, _ = _get_groups_distinct_coeffs(col_to_compare, group1, group2, exploded_df, coeff_df, coeff_type=df_type)
+
+    _, _, p_value = run_general_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs, second_group_all_coeffs,
+                                 first_group_name, second_group_name, model_info, df_type, n_permutations=1000)
+
+    # Get data for comparison
+    first_half_model_info  = {**model_info, "model_full_name": f"{model_info['model_full_name']}{ending_first_control}"}
+    second_half_model_info = {**model_info, "model_full_name": f"{model_info['model_full_name']}{ending_second_control}"}
+
+    first_half_coeff_df, first_half_exploded_df = get_coeffs_df(sid, mode, first_half_model_info, filter_type, min_alpha, max_alpha, num_alphas,
+                                          kfolds_threshold, df_type, emb_mod=emb_mod, query=query, return_exploded=True)
+    second_half_coeff_df, second_half_exploded_df = get_coeffs_df(sid, mode, second_half_model_info, filter_type, min_alpha, max_alpha, num_alphas,
+                                          kfolds_threshold, df_type, emb_mod=emb_mod, query=query, return_exploded=True)
+
+    split_half_Jaccard_by_col_to_compare(first_half_coeff_df, first_half_exploded_df, second_half_coeff_df, second_half_exploded_df, model_info, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query, text_shift_left, text_shift_right, ending_first_control=ending_first_control, ending_second_control=ending_second_control)
+    split_half_Jaccard_per_elec(first_half_coeff_df, second_half_coeff_df, title = f"{model_info['model_short_name']} | {df_type} | \nk={kfolds_threshold},α range: {min_alpha} to {max_alpha}, {num_alphas} values)" + (f"\nfilter={query}" if query else ""))
+
+
+    # first_half_df  = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode,
+    #                                    first_half_model_info,  num_alphas, sid, emb_mod, query=query, df_type=df_type)
+    # second_half_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode,
+    #                                    second_half_model_info, num_alphas, sid, emb_mod, query=query, df_type=df_type)
+
+    # split_half_Jaccard(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, coeff_type, emb_mod, query)
+
 def coeff_scatter(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, col_to_compare, group1, group2,
                   kfolds_threshold=10, emb_mod=None, query="", df_type="lasso&corr", save_path=None):
     coeff_df, exploded_df = get_group_coeffs(col_to_compare, filter_type, group1, group2, kfolds_threshold, max_alpha,
@@ -1183,7 +1213,271 @@ def run_group_permutation_test(col_to_compare, coeff_df, first_group_all_coeffs,
 
     return first_group_all_coeffs, second_group_all_coeffs, results
 
+def split_half_Jaccard_per_elec(first_half_df, second_half_df, title):
+    """
+    Computes split-half Jaccard similarity per electrode per time point.
+    For each (electrode, time_index) pair, computes Jaccard = |A ∩ B| / |A ∪ B|
+    between the chosen coefficients from the first-half and second-half models.
 
+    Returns
+    -------
+    results_df : DataFrame
+        Columns: full_elec_name, time_index, jaccard
+    mean_jaccard : float
+        Mean Jaccard across all (electrode, time_index) pairs with a non-empty union.
+    """
+
+    # Convert coefficient lists to sets, keyed by (full_elec_name, time_index)
+    def to_coeff_sets(df):
+        return (
+            df.set_index(["full_elec_name", "time_index"])["actual_chosen_coeffs"]
+            .apply(lambda x: set(x) if isinstance(x, (list, np.ndarray)) else set())
+        )
+
+    first_sets  = to_coeff_sets(first_half_df)
+    second_sets = to_coeff_sets(second_half_df)
+
+    # assert set(first_sets.index) == set(second_sets.index), "Indices are not identical!" #TODO: add back once all electrodes are run
+
+    common_keys = first_sets.index.intersection(second_sets.index)
+
+    records = []
+    for key in common_keys:
+        s1 = first_sets[key]
+        s2 = second_sets[key]
+        union = s1 | s2
+        if not union:
+            records.append({"full_elec_name": key[0], "time_index": key[1], "jaccard": None})
+            continue
+        jaccard = len(s1 & s2) / len(union)
+        records.append({"full_elec_name": key[0], "time_index": key[1], "jaccard": jaccard})
+
+    results_df = pd.DataFrame(records)
+    mean_jaccard = results_df["jaccard"].mean() if not results_df.empty else float("nan")
+    print(f"Split-half Jaccard per elec (n={len(results_df)} elec×timepoint pairs): mean={mean_jaccard:.4f}")
+
+    # Build encoding lookup: (full_elec_name, time_index) -> encoding
+    first_enc  = first_half_df.set_index(["full_elec_name", "time_index"])["encoding"]
+    second_enc = second_half_df.set_index(["full_elec_name", "time_index"])["encoding"]
+
+    time_points = np.linspace(-2, 2, 161)
+    electrodes = results_df["full_elec_name"].unique()
+
+    # Average encoding across electrodes per time_index
+    avg_first_enc  = first_half_df.groupby("time_index")["encoding"].mean()
+    avg_second_enc = second_half_df.groupby("time_index")["encoding"].mean()
+    avg_jacc       = results_df.groupby("time_index")["jaccard"].mean()
+
+    total_rows = 2 + len(electrodes) * 2  # 2 average rows at top + 2 per electrode
+    subplot_titles = ["Average encoding", "Average Jaccard"] + [
+        title for elec in electrodes for title in (elec, "")
+    ]
+
+    fig = make_subplots(
+        rows=total_rows, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.003,
+        subplot_titles=subplot_titles,
+    )
+
+    # --- Average encoding subplot (row 1) ---
+    fig.add_trace(go.Scatter(
+        x=time_points[avg_first_enc.index], y=avg_first_enc.values,
+        mode="lines", name="first half", line=dict(color="steelblue"),
+        legendgroup="first", showlegend=True,
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=time_points[avg_second_enc.index], y=avg_second_enc.values,
+        mode="lines", name="second half", line=dict(color="tomato"),
+        legendgroup="second", showlegend=True,
+    ), row=1, col=1)
+    fig.add_vline(x=0, line=dict(color="black", width=1, dash="dash"), row=1, col=1)
+    fig.update_yaxes(title_text="encoding", row=1, col=1)
+
+    # --- Average Jaccard subplot (row 2) ---
+    fig.add_trace(go.Scatter(
+        x=time_points[avg_jacc.index], y=avg_jacc.values,
+        mode="lines", name="Jaccard", line=dict(color="mediumpurple"),
+        legendgroup="jaccard", showlegend=True,
+    ), row=2, col=1)
+    fig.add_vline(x=0, line=dict(color="black", width=1, dash="dash"), row=2, col=1)
+    fig.update_yaxes(title_text="Jaccard", range=[0, 1], row=2, col=1)
+
+    # --- Per-electrode subplots ---
+    for i, elec in enumerate(electrodes):
+        enc_row  = 2 + i * 2 + 1
+        jacc_row = 2 + i * 2 + 2
+
+        elec_first_enc  = first_enc.xs(elec, level="full_elec_name")  if elec in first_enc.index.get_level_values(0)  else pd.Series(dtype=float)
+        elec_second_enc = second_enc.xs(elec, level="full_elec_name") if elec in second_enc.index.get_level_values(0) else pd.Series(dtype=float)
+        elec_jacc = results_df[results_df["full_elec_name"] == elec].set_index("time_index")["jaccard"]
+
+        fig.add_trace(go.Scatter(
+            x=time_points[elec_first_enc.index], y=elec_first_enc.values,
+            mode="lines", name="first half", line=dict(color="steelblue"),
+            legendgroup="first", showlegend=False,
+        ), row=enc_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=time_points[elec_second_enc.index], y=elec_second_enc.values,
+            mode="lines", name="second half", line=dict(color="tomato"),
+            legendgroup="second", showlegend=False,
+        ), row=enc_row, col=1)
+        fig.add_trace(go.Scatter(
+            x=time_points[elec_jacc.index], y=elec_jacc.values,
+            mode="lines", name="Jaccard", line=dict(color="mediumpurple"),
+            legendgroup="jaccard", showlegend=False,
+        ), row=jacc_row, col=1)
+
+        for row in (enc_row, jacc_row):
+            fig.add_vline(x=0, line=dict(color="black", width=1, dash="dash"), row=row, col=1)
+
+        fig.update_yaxes(title_text="encoding", row=enc_row, col=1)
+        fig.update_yaxes(title_text="Jaccard", range=[0, 1], row=jacc_row, col=1)
+
+    # fig.update_xaxes(showticklabels=True, tickvals=[-2, -1, 0, 1, 2])
+    fig.update_xaxes(title_text="Time (s)", row=total_rows, col=1)
+    fig.update_layout(
+        height=200 * total_rows,
+        title_text=f"Split-half encoding & Jaccard per electrode\n{title}",
+        template="plotly_white",
+    )
+    fig.show()
+
+    return results_df, mean_jaccard
+
+def split_half_Jaccard_by_col_to_compare(first_half_coeff_df, first_half_exploded_df, second_half_coeff_df, second_half_exploded_df, model_info, min_alpha, max_alpha, num_alphas, kfolds_threshold, df_type, query, text_shift_left=0.2, text_shift_right=0.2, ending_first_control="-first_half", ending_second_control="-second_half"):
+
+    first_half_first_group_all_coeffs, first_half_first_group_name, first_half_second_group_all_coeffs, first_half_second_group_name, _ = _get_groups_distinct_coeffs(
+        col_to_compare, group1, group2, first_half_exploded_df, first_half_coeff_df, coeff_type=df_type, run_permutation_test=False)
+    second_half_first_group_all_coeffs, second_half_first_group_name, second_half_second_group_all_coeffs, second_half_second_group_name, _ = _get_groups_distinct_coeffs(
+        col_to_compare, group1, group2, second_half_exploded_df, second_half_coeff_df, coeff_type=df_type, run_permutation_test=False)
+
+    first_half_first_group = (ending_first_control, first_half_first_group_name, first_half_first_group_all_coeffs)
+    first_half_second_group = (ending_first_control, first_half_second_group_name, first_half_second_group_all_coeffs)
+    second_half_first_group = (ending_second_control, second_half_first_group_name, second_half_first_group_all_coeffs)
+    second_half_second_group = (ending_second_control, second_half_second_group_name, second_half_second_group_all_coeffs)
+
+    # plot venn for all possible pairs:
+    groups = [first_half_first_group, first_half_second_group, second_half_first_group, second_half_second_group]
+    all_pairs = list(combinations(groups, 2))
+
+    for (g1_half_type, g1_name, g1_all_coeffs), (g2_half_type, g2_name, g2_all_coeffs) in all_pairs:
+        g1_full_name = g1_half_type+" "+g1_name
+        g2_full_name = g2_half_type+" "+g2_name
+
+        save_ending = f"control_sid-{sid}_dftype-{df_type}_colcompare-{g1_full_name}-vs-{g2_full_name}_filter-{filter_type}_model-{model_name}_layer-{models_info[model_name]['layer']}_context--{models_info[model_name]['context']}_embedmod-{emb_mod}_kfoldsthresh-{kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{num_alphas}{f'_{emb_mod}' if emb_mod else ''}"
+        save_path = os.path.join(save_dir, save_ending)
+        os.makedirs(save_path, exist_ok=True)
+
+        create_venn_diagram(g1_full_name, g2_full_name,
+                            g1_all_coeffs, g2_all_coeffs,
+                            title=f"Control! {g1_full_name} vs {g2_full_name} | {model_info['model_short_name']} | {df_type}"
+                                  + (f"(\nk={kfolds_threshold},α range: {min_alpha} to {max_alpha}, {num_alphas} values)")
+                                  + (f"\nfilter={query}" if query else ""),
+                            color1=COLOR_PALETTE[g1_name],
+                            color2=COLOR_PALETTE[g2_name],
+                            overlap_color="#E0DADF",
+                            font_size=25,
+                            text_shift_left=text_shift_left,
+                            text_shift_right=text_shift_right,
+                            edge_color="black",
+                            edge_width=0.8,
+                            fig_name="split_half_venn",
+                            save_path=save_path)
+    return
+
+def plot_split_half_Jaccard_over_time(results_df):
+    """
+    Plots mean split-half Jaccard similarity over time points.
+    For each time_index, shows the mean ± SEM across all electrodes.
+
+    Parameters
+    ----------
+    results_df : DataFrame
+        Output of split_half_Jaccard_per_elec — columns: full_elec_name, time_index, jaccard.
+    """
+    time_points = np.linspace(-2, 2, 161)
+
+    grouped = results_df.groupby("time_index")["jaccard"]
+    mean_j = grouped.mean()
+    sem_j  = grouped.sem()
+
+    x = time_points[mean_j.index]
+    y = mean_j.values
+    err = sem_j.values
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=x, y=y + err, mode="lines", line=dict(width=0),
+        showlegend=False, hoverinfo="skip"
+    ))
+    fig.add_trace(go.Scatter(
+        x=x, y=y - err, mode="lines", line=dict(width=0),
+        fill="tonexty", fillcolor="rgba(99,110,250,0.2)",
+        showlegend=False, hoverinfo="skip"
+    ))
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines",
+        line=dict(color="rgb(99,110,250)", width=2),
+        name="Mean Jaccard ± SEM"
+    ))
+    fig.add_vline(x=0, line=dict(color="black", width=1, dash="dash"))
+    fig.update_layout(
+        title="Split-half Jaccard similarity over time",
+        xaxis_title="Time (s)",
+        yaxis_title="Jaccard similarity",
+        yaxis=dict(range=[0, 1]),
+        template="plotly_white",
+    )
+    fig.show()
+    return fig
+
+
+def split_half_Jaccard(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas, kfolds_threshold, coeff_type, emb_mod, query):
+    """
+    Computes within-electrode split-half Jaccard similarity.
+    For each electrode, pools the lasso-chosen coefficients across all time lags from
+    the first-half and second-half encoding results (folders named
+    <model_name>-first_half-lag2k-25-all / <model_name>-second_half-lag2k-25-all),
+    then computes Jaccard = |A ∩ B| / |A ∪ B| per electrode and reports the mean.
+
+    Returns
+    -------
+    mean_jaccard : float
+    jaccard_scores : list of per-electrode Jaccard values
+    """
+    first_half_model_info  = {**model_info, "model_full_name": f"{model_info['model_full_name']}-first_half"}
+    second_half_model_info = {**model_info, "model_full_name": f"{model_info['model_full_name']}-second_half"}
+
+    first_half_df  = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode,
+                                       first_half_model_info,  num_alphas, sid, emb_mod, query=query, df_type=coeff_type)
+    second_half_df = prepare_coeffs_df(filter_type, kfolds_threshold, max_alpha, min_alpha, mode,
+                                       second_half_model_info, num_alphas, sid, emb_mod, query=query, df_type=coeff_type)
+
+    def pool_electrode_coeffs(df):
+        """Union of chosen coefficient indices across all time lags, per electrode."""
+        return (
+            df[df["num_of_chosen_coeffs"] > 0]
+            .groupby("full_elec_name")["actual_chosen_coeffs"]
+            .apply(lambda rows: set(c for coeffs in rows for c in coeffs))
+        )
+
+    first_half_coeffs  = pool_electrode_coeffs(first_half_df)
+    second_half_coeffs = pool_electrode_coeffs(second_half_df)
+
+    common_electrodes = first_half_coeffs.index.intersection(second_half_coeffs.index)
+    jaccard_scores = []
+    for elec in common_electrodes:
+        s1 = first_half_coeffs[elec]
+        s2 = second_half_coeffs[elec]
+        union = s1 | s2
+        if not union:
+            continue
+        jaccard_scores.append(len(s1 & s2) / len(union))
+
+    mean_jaccard = np.mean(jaccard_scores) if jaccard_scores else float("nan")
+    print(f"Split-half Jaccard (n={len(jaccard_scores)} electrodes): mean={mean_jaccard:.4f}")
+    return mean_jaccard, jaccard_scores
 
 
 def get_group_query(col_to_compare, group1, group2, query: str) -> str:
@@ -1192,6 +1486,175 @@ def get_group_query(col_to_compare, group1, group2, query: str) -> str:
     else:
         query = f"(({col_to_compare} == '{group1}') | ({col_to_compare} == '{group2}'))"
     return query
+
+def report_patient_electrode_stats(df, areas=('IFG', 'STG'), area_col='brain_area'):
+    """
+    Reports number of patients and electrode-to-patient mapping for the given ROIs.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Coeffs dataframe (one row per electrode × time_point).
+    areas : tuple
+        ROI names to report on.
+    area_col : str
+        Column name for brain area.
+
+    Returns
+    -------
+    summary : DataFrame
+        Table with patient IDs as rows, areas as columns, electrode counts as values.
+    """
+    df = df.copy()
+    df['patient_id'] = df['full_elec_name'].str.split('_').str[0]
+
+    area_df = df[df[area_col].isin(areas)]
+
+    # Unique electrodes per patient per area
+    elec_per_patient = (area_df.groupby(['patient_id', area_col])['full_elec_name']
+                        .nunique()
+                        .reset_index(name='n_electrodes'))
+
+    summary = (elec_per_patient
+               .pivot(index='patient_id', columns=area_col, values='n_electrodes')
+               .reindex(columns=list(areas))
+               .fillna(0)
+               .astype(int))
+
+    print("=== Patient Electrode Summary ===")
+    print(summary.to_string())
+    print(f"\nTotal patients in dataset: {df['patient_id'].nunique()}")
+    for area in areas:
+        if area in summary.columns:
+            n_pts = (summary[area] > 0).sum()
+            n_elecs = int(summary[area].sum())
+            print(f"  {area}: {n_pts} patients, {n_elecs} electrodes total")
+
+    has_both = pd.Series(True, index=summary.index)
+    for area in areas:
+        if area in summary.columns:
+            has_both &= (summary[area] > 0)
+    print(f"  Patients with electrodes in both {' and '.join(areas)}: {has_both.sum()}")
+
+    return summary
+
+
+def plot_within_patient_roi_comparison(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode,
+                                       areas=('IFG', 'STG'), metric='num_of_chosen_coeffs',
+                                       kfolds_threshold=10, query="", df_type="lasso&corr",
+                                       sig_test='wilcoxon'):
+    """
+    Conducts within-patient ROI comparison for patients that have electrodes in both areas.
+
+    For each patient with electrodes in both ROIs, computes the mean `metric` across
+    their electrodes and time points, then runs a paired statistical test across patients.
+
+    Parameters
+    ----------
+    areas : tuple
+        Two ROI names to compare (default: ('IFG', 'STG')).
+    metric : str
+        Column to compare (default: 'num_of_chosen_coeffs').
+    sig_test : str
+        'wilcoxon' (Wilcoxon signed-rank) or 't-test' (paired t-test).
+
+    Returns
+    -------
+    pivot : DataFrame or None
+        Per-patient means for each area (rows=patients, cols=areas), or None if no
+        patients have both areas.
+    """
+    area_col = 'brain_area'
+    area_query = " | ".join([f"({area_col} == '{a}')" for a in areas])
+    combined_query = f"({area_query})"
+    if query:
+        combined_query = f"({query}) & {combined_query}"
+
+    df, _ = get_coeffs_df(sid, mode, model_info, filter_type, min_alpha, max_alpha, num_alphas,
+                          kfolds_threshold, df_type, query=combined_query)
+
+    report_patient_electrode_stats(df, areas=areas, area_col=area_col)
+
+    df['patient_id'] = df['full_elec_name'].str.split('_').str[0]
+
+    # Mean metric per patient × area (average across all electrode × time_point rows)
+    patient_area_mean = (df.groupby(['patient_id', area_col])[metric]
+                         .mean()
+                         .reset_index())
+
+    # Keep only patients with data in both areas
+    patients_per_area = patient_area_mean.groupby('patient_id')[area_col].apply(set)
+    patients_with_both = patients_per_area[patients_per_area.apply(lambda x: set(areas).issubset(x))].index
+
+    if len(patients_with_both) == 0:
+        print(f"No patients have electrodes in both {areas[0]} and {areas[1]}. Cannot run within-patient comparison.")
+        return None
+
+    print(f"\n{len(patients_with_both)} patients have electrodes in both {areas[0]} and {areas[1]}.")
+    both_elec_counts = (df[df['patient_id'].isin(patients_with_both)]
+                        .groupby(['patient_id', area_col])['full_elec_name']
+                        .nunique()
+                        .unstack(fill_value=0)
+                        .reindex(columns=list(areas), fill_value=0))
+    print(both_elec_counts.to_string())
+
+    paired_df = patient_area_mean[patient_area_mean['patient_id'].isin(patients_with_both)]
+    pivot = paired_df.pivot(index='patient_id', columns=area_col, values=metric)
+    area1, area2 = areas
+
+    # Paired statistical test
+    if sig_test.lower() == 'wilcoxon':
+        stat, p = stats.wilcoxon(pivot[area1], pivot[area2])
+        test_name = "Wilcoxon signed-rank"
+    else:
+        stat, p = stats.ttest_rel(pivot[area1], pivot[area2])
+        test_name = "Paired t-test"
+
+    print(f"\n{test_name}: stat={stat:.4f}, p={p:.4f}")
+
+    # ---- Plot: spaghetti + group mean ± SEM ----
+    fig, ax = plt.subplots(figsize=(4, 6))
+
+    for patient in pivot.index:
+        ax.plot([0, 1], [pivot.loc[patient, area1], pivot.loc[patient, area2]],
+                color='gray', alpha=0.4, linewidth=1, zorder=1)
+        ax.scatter([0, 1], [pivot.loc[patient, area1], pivot.loc[patient, area2]],
+                   color='gray', alpha=0.5, s=15, zorder=2)
+
+    means = pivot[[area1, area2]].mean()
+    sems = pivot[[area1, area2]].sem()
+    for i, area in enumerate([area1, area2]):
+        color = COLOR_PALETTE.get(area, 'black')
+        ax.errorbar(i, means[area], yerr=sems[area],
+                    fmt='o', color=color, markersize=12, linewidth=3, capsize=6, zorder=3)
+
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels([area1, area2], fontsize=13)
+    ax.set_ylabel(metric.replace('_', ' ').title(), fontsize=12)
+
+    # Significance bracket
+    y_max = max(pivot[area1].max(), pivot[area2].max())
+    y_min = min(pivot[area1].min(), pivot[area2].min())
+    y_range = y_max - y_min if y_max != y_min else 1.0
+    y_line = y_max + y_range * 0.12
+    ax.plot([0, 1], [y_line, y_line], color='black', linewidth=1.5)
+    stars = '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else 'n.s.'
+    p_text = f'{stars} (p={p:.3f})'
+    ax.text(0.5, y_line + y_range * 0.03, p_text, ha='center', va='bottom', fontsize=11)
+    ax.set_ylim(bottom=y_min - y_range * 0.05, top=y_line + y_range * 0.22)
+
+    ax.set_title(
+        f'Within-patient {area1} vs {area2}\n'
+        f'N={len(patients_with_both)} patients, {test_name}'
+        + (f'\n{query}' if query else ''),
+        fontsize=11)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    plt.tight_layout()
+    plt.show()
+
+    return pivot
+
 
 def run_all_boxplots(sid, filter_type, model_info, min_alpha, max_alpha, num_alphas, mode, kfolds_threshold, df_type="lasso&corr", sig_test="t-test"):
 
@@ -2155,6 +2618,7 @@ if __name__ == '__main__':
     parser.add_argument("--col-to-compare", nargs='+',  default=["brain_area"], choices=["brain_area", "rounded_encoding", "time_bin", "time_bin_and_brain_area"], help="One or more columns to compare")
     parser.add_argument("--run-venn", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-scatter", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--run-jac-control", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-pca", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-sim", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--run-violin", action=argparse.BooleanOptionalAction, default=False)
@@ -2164,6 +2628,7 @@ if __name__ == '__main__':
 
     run_venn = args.run_venn
     run_scatter = args.run_scatter
+    run_jaccard_control = args.run_jac_control
     run_pca = args.run_pca
     run_sim = args.run_sim
     run_violin = args.run_violin
@@ -2240,6 +2705,12 @@ if __name__ == '__main__':
             if run_scatter:
                 coeff_scatter(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare,
                               group1=group1, group2=group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type, save_path=save_path)
+            if run_jaccard_control:
+                jaccard_controls(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
+                                 col_to_compare, group1, group2, kfolds_threshold=kfolds_threshold, emb_mod=emb_mod, query=query, df_type=df_type, ending_first_control="-odd_half", ending_second_control="-even_half")
+                plot_within_patient_roi_comparison(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode,
+                                                   areas=('IFG', 'STG'), metric='num_of_chosen_coeffs',
+                                                   kfolds_threshold=10, query="", df_type="lasso")
 
             # coeffs_values(sid, filter_type, models_info[model_name], min_alpha, max_alpha, num_alphas, mode, col_to_compare=col_to_compare, group1=group1, group2=group2, query=query, kfolds_threshold=kfolds_threshold, df_type=df_type,  top=top)
 

@@ -1012,6 +1012,12 @@ if __name__ == '__main__':
         "gemma2b": {"model_full_name": "gemma-2-2b", "layer": 13, "context": 32, "embedding_size": 2304, "model_short_name": "gemma2b", "dash": "solid", "colors": [('255', '158', '191'), ('158', '210', '255')]},
         # [('200','230','201'),('129','199','132'),('76','175','80'),('56','142','60'),('27','94','32')]},
         "gemma9b": {"model_full_name": "gemma-2-9b", "layer": 21, "context": 32, "embedding_size": 3584, "model_short_name":"gemma9b", "dash": "solid", "colors": [('255', '158', '191'), ('158', '210', '255')]},#[('200','230','201'),('129','199','132'),('76','175','80'),('56','142','60'),('27','94','32')]},
+        "gemma9b-first_half": {"model_full_name": "gemma-2-9b-first_half", "layer": 21, "context": 32, "embedding_size": 3584,
+                    "model_short_name": "gemma9b", "dash": "solid",
+                    "colors": [('255', '158', '191'), ('158', '210', '255')]},
+        "gemma9b-second_half": {"model_full_name": "gemma-2-9b-second_half", "layer": 21, "context": 32, "embedding_size": 3584,
+                    "model_short_name": "gemma9b", "dash": "solid",
+                    "colors": [('255', '158', '191'), ('158', '210', '255')]},
         "arb": {"model_full_name": "gemma-2-9b", "layer": 21, "context": 32, "embedding_size": 3584, "model_short_name":"gemma9b", "dash": "solid", "colors": [('255', '158', '191'), ('158', '210', '255')]},#[('200','230','201'),('129','199','132'),('76','175','80'),('56','142','60'),('27','94','32')]},
         "gpt2": {"model_full_name": "gpt2-xl", "layer": 24, "context": 32, "embedding_size": 1600, "model_short_name": "gpt2", "dash": "solid",
                     "colors": [('218', '204', '233'), ('181', '153', '211'), ('144', '102', '189'),
@@ -1024,6 +1030,13 @@ if __name__ == '__main__':
         "gemma-scope9b": {"model_full_name": "gemma-scope-9b-pt-res-canonical", "layer": 21, "context": 32, "embedding_size": 16384,
                                             "model_short_name": "gemma-scope9b", "dash": "solid",
                                             "colors": [('190', '48', '96'), ('50', '131', '196')]},
+        "gemma-scope9b-first_half": {"model_full_name": "gemma-scope-9b-pt-res-canonical-first_half", "layer": 21, "context": 32,
+                          "embedding_size": 16384,
+                          "model_short_name": "gemma-scope9b", "dash": "solid",
+                          "colors": [('190', '48', '96'), ('50', '131', '196')]},
+        "gemma-scope9b-second_half": {"model_full_name": "gemma-scope-9b-pt-res-canonical-second_half", "layer": 21,
+                                     "context": 32, "embedding_size": 16384, "model_short_name": "gemma-scope9b", "dash": "solid",
+                                     "colors": [('190', '48', '96'), ('50', '131', '196')]},
         "gemma-scope9b-mlp": {"model_full_name": "gemma-scope-9b-pt-res-canonical", "layer": 21, "context": 32, "embedding_size": 16384,
                               "model_short_name": "gemma-scope9b-mlp", "dash": "solid",
                               "colors": [('190', '48', '96'), ('50', '131', '196')]},
@@ -1064,15 +1077,16 @@ if __name__ == '__main__':
     models_str = "_".join(models_to_plot)
     lines_to_plot_str = "_".join(lines_to_plot)
     save_dir = "../results/figures/coeffs_analysis"
-    sort_by_first = "early_vs_late_count"  # Options: "sum", "first_then_last_then_sum", "first_true", "last_true", "neuron_index", "raster", "num_of_appear"
-    sort_by_second = "first_last_gap"
 
     save_ending = f"{filter_type}_filter_models-{models_str}_lines-{lines_to_plot_str}_kfoldsthresh-{reliable_kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}{f'_{emb_mod}' if emb_mod else ''}_corr-{computed_corr_str}"  # Optional, can be empty string if not needed
-    print(save_ending)
-    compare_only_encoding = False
+    compare_only_encoding = False # Set to True to compare different encodings (e.g. lasso and ridge in gemma and gemma-scope). Sets colors accordingly
     plot_encoding_and_coeffs_dual_axis(patient, mode, filter_type, min_alpha, max_alpha, amount_of_alphas, p_threshold, reliable_kfolds_threshold,
                                        models_info, models_to_plot, lines_to_plot, computed_corr_config, save_dir, save_ending, emb_mod, query=query, compare_only_encoding=compare_only_encoding)
+    print(save_ending)
 
+
+    sort_by_first = "num_of_appear"  # Options: sum, first_true, last_true, first_last_gap, early_vs_late, early_vs_late_continues, early_vs_late_count, num_of_appear, peak_encoding
+    sort_by_second = "early_vs_late_count"
     save_ending = f"{filter_type}_filter_kfoldsthresh-{reliable_kfolds_threshold}_alphas-{min_alpha}_{max_alpha}_{amount_of_alphas}{f'_{emb_mod}' if emb_mod else ''}_corr-{computed_corr_str}"  # Optional, can be empty string if not needed
     print(save_ending)
     plot_coeffs_heatmap(patient, mode, filter_type, min_alpha, max_alpha, amount_of_alphas, p_threshold, reliable_kfolds_threshold, models_info, models_to_plot, lines_to_plot,
