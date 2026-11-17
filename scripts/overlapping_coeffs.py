@@ -14,6 +14,7 @@ from upsetplot import from_contents, UpSet
 from plotly.subplots import make_subplots
 import matplotlib.gridspec as gridspec
 import seaborn as sns
+from glob import glob
 from scipy import stats
 import matplotlib.colors as mc
 from scipy.stats import fisher_exact, chi2_contingency
@@ -30,7 +31,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from scipy.stats import pearsonr
 from tqdm import tqdm
-from tfsplt_utils import get_coeffs_df, prepare_coeffs_df, _get_exploded_united_lasso_and_corr
+from tfsplt_utils import get_coeffs_df, prepare_coeffs_df, _get_exploded_united_lasso_and_corr, get_dir, get_recording_type
 from sklearn.metrics.pairwise import cosine_similarity
 
 SHOW_FIGS = True
@@ -62,7 +63,9 @@ COLOR_PALETTE = {"IFG": '#ff4da0', "STG": '#00c16a', #IFG-pink, STG-green
                  # '-0.4≤x<0':'#D1D1D1', '0≤x<0.4':'#A6A6A6', #Dark then light grey
                  'IFG_-0.4≤x<0':"#ff7fbc", 'IFG_0≤x<0.4':"#f72585", 'STG_-0.4≤x<0':"#26cc80", 'STG_0≤x<0.4':"#008e4d",
                  0: "#ff8500", 0.1: "#ff9100", 0.2: "#ff9e00", 0.3: "#00b4d8", 0.4: "#0096c7", 0.5: "#0077b6",
-                 '0': "#ff8500", '0.1': "#ff9100", '0.2': "#ff9e00", '0.3': "#00b4d8", '0.4': "#0096c7", '0.5': "#0077b6",}
+                 '0': "#ff8500", '0.1': "#ff9100", '0.2': "#ff9e00", '0.3': "#00b4d8", '0.4': "#0096c7", '0.5': "#0077b6",
+                "D": '#ff4da0', "V": '#00c16a',
+                 }
                # 'precentral': "#C6E7FF", 'premotor': "#C6E7FF", 'MFG': "#C6E7FF", 'postcg': "#C6E7FF", 'aMTG': "#C6E7FF", 'TP': "#C6E7FF", 'AG': "#C6E7FF", 'parietal': "#C6E7FF", 'pmtg': "#C6E7FF", 'other': "#C6E7FF"}
                 # B4F8C8, #FBE7C6
 

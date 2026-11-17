@@ -138,6 +138,7 @@ Results
 results/*
 logs/*
 data/*
+old-scripts/*
 *.csv
 *.png
 *.txt
@@ -147,3 +148,5 @@ data/*
 .cache
 .vscode
 /Daria Makefile
+/Makefile_backup
+/Makefile-orig

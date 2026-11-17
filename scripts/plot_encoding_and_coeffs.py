@@ -16,6 +16,7 @@ from overlapping_coeffs import COLOR_PALETTE
 
 AREA_QUERY = "(brain_area == 'STG') | (brain_area == 'IFG')"
 TIME_QUERY = "(time_bin == '-0.4≤x<0') | (time_bin == '0≤x<0.4')"
+STREAM_QUERY = "(late_stream == 'V') | (late_stream == 'D')"
 AREA_AND_TIME_QUERY = f"({AREA_QUERY})&({TIME_QUERY})"
 
 NEUTRAL_COLOR = ('168', '101', '201')# ('255','157','0')  # Light orange
@@ -84,7 +85,7 @@ def plot_encoding_and_coeffs_dual_axis(patient, mode, filter_type, min_alpha, ma
             # If filter type is int:
             if isinstance(filter_type, int):
                 assert amount_of_electrodes == filter_type, f"Expected {filter_type} electrodes, got {amount_of_electrodes}"
-            fig = prep_dual_axis_figs(amount_of_electrodes, electrode_names_list, filter_type, mode, patient, save_ending)
+            fig = prep_dual_axis_figs(amount_of_electrodes, electrode_names_list, filter_type, mode, patient, save_ending, query)
         plotting_info = get_plotting_info(models_info[model_name], reliable_kfolds_threshold, compare_only_encoding)
 
         # Plot encoding and num_coeffs
@@ -183,7 +184,7 @@ def get_plotting_info(model_info, reliable_kfolds_threshold, compare_only_encodi
     return plotting_info
 
 def prep_dual_axis_figs(amount_of_electrodes: int, electrode_names_list: DataFrame, filter_type: int | str, mode,
-                        patient, save_ending) -> Figure:
+                        patient, save_ending, query="") -> Figure:
     subplot_titles = [f"Mean over all electrodes"] # (filter - {filter_type})
     for i in range(amount_of_electrodes):
         if patient in NON_ENGLISH_SID:
@@ -218,9 +219,13 @@ def prep_dual_axis_figs(amount_of_electrodes: int, electrode_names_list: DataFra
         shared_xaxes=True
     )
 
-    # Add a title to the entire figure
+    # Add a title to the entire figure, with the query and electrode count on a second line
+    subtitle = f"{amount_of_electrodes} electrodes"
+    if query:
+        subtitle += f" | query: {query}"
+    title_text = f"{save_ending}<br><span style='font-size: 70%;'>{subtitle}</span>"
     fig.update_layout(
-        title_text=save_ending,  # Replace with your actual title
+        title_text=title_text,  # Replace with your actual title
         # title_font_size=20,  # Optional: adjust font size
         title_x=0.5,  # Optional: centers the title (0-1 scale)
         title_font_family="Arial"  # Optional: specify font family
@@ -1037,7 +1042,7 @@ if __name__ == '__main__':
         "gemma-scope9b-second_half": {"model_full_name": "gemma-scope-9b-pt-res-canonical-second_half", "layer": 21,
                                      "context": 32, "embedding_size": 16384, "model_short_name": "gemma-scope9b", "dash": "solid",
                                      "colors": [('190', '48', '96'), ('50', '131', '196')]},
-        "gemma-scope9b-mlp": {"model_full_name": "gemma-scope-9b-pt-res-canonical", "layer": 21, "context": 32, "embedding_size": 16384,
+        "gemma-scope9b-mlp": {"model_full_name": "gemma-scope-9b-pt-mlp-canonical", "layer": 21, "context": 32, "embedding_size": 16384,
                               "model_short_name": "gemma-scope9b-mlp", "dash": "solid",
                               "colors": [('190', '48', '96'), ('50', '131', '196')]},
                                             # "colors": [('248', '187', '208'), ('240', '98', '146'), ('233', '30', '99'),

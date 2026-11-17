@@ -221,7 +221,11 @@ def load_electrode_names(filter_type):
     Returns all electrodes names for a given filter_type (e.g. 160 for the 160 significant electrodes for podcast)
     """
     electrode_names_csv_path = None
-    if filter_type == 160 or filter_type == "160":
+    if filter_type == 160200 or filter_type == "160_and_200" or filter_type == 160208 or filter_type == "160_and_208":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_777_160_and_208_together.csv"
+    elif filter_type == 200 or filter_type == "200" or filter_type == 208 or filter_type == "208":
+        electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_208-gptxl.csv"
+    elif filter_type == 160 or filter_type == "160":
         electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_777_160.csv"
     elif filter_type == 50 or filter_type == "50":
         electrode_names_csv_path = "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/useful/podcast_777_glove_elecs.csv"
@@ -326,6 +330,18 @@ def get_elec_locations(subjects_type):
     if "777" in str(subjects_type):
         elec_locations = pd.read_csv(
             "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/sig-elecs/podcast-old/elec_masterlist.csv")
+        lichtheim = pd.read_csv(
+            "/scratch/gpfs/HASSON/tk6637/princeton/247-plotting/data/plotting/brainplot/777/lichtheim.csv")
+        lichtheim = lichtheim.drop(columns=["Stream", "Position in Stream"]).rename(columns={"Location":"netaniel_location", "Stream for Analysis": "stream", "Position for Analysis": "position_in_stream"})
+
+        elec_locations = elec_locations.merge(
+            lichtheim[['Electrode', 'NYU Subject', 'netaniel_location', 'stream',
+                    'position_in_stream', 'confidence', 'comments', 'mne_x', 'mne_y', 'mne_z']],
+            left_on=["subject", "name"],
+            right_on=["NYU Subject", "Electrode"],
+            how="left"
+        ).drop(columns=["NYU Subject", "Electrode"])
+
         # elec_locations["full_elec_name"] = elec_locations["subject"].astype(str) + "_" + elec_locations["name"]
     elif "888" in str(subjects_type):
         elec_locations = pd.read_csv(
@@ -549,6 +565,12 @@ def prepare_coeffs_df(filter_type, kfolds_threshold: int, max_alpha, min_alpha, 
     df = _process_coeff_df(df)
 
     if query:
+        if "peak" in query:
+            df = df.sort_values("encoding").drop_duplicates("full_elec_name", keep="last")
+            if query == "peak":
+                query = ""
+            elif "(peak) &" in query:
+                query = query.replace("(peak) &", "")
         df = df.query(query)
 
     return df
@@ -912,5 +934,12 @@ def _process_coeff_df(df: DataFrame):
     if "princeton_class" in df.columns:
         df.rename(columns={'princeton_class': 'brain_area'}, inplace=True)
         df["time_bin_and_brain_area"] = df['brain_area'] + "_" + df['time_bin']
+    if "stream" in df.columns and "position_in_stream" in df.columns:
+        conditions = [
+            df["stream"].str.contains("V") & df["position_in_stream"].str.contains(r"[345]"),
+            df["stream"].str.contains("D") & df["position_in_stream"].str.contains(r"[345]"),
+        ]
+        choices = ["V", "D"]
+        df["late_stream"] = np.select(conditions, choices, default="other")
 
     return df
